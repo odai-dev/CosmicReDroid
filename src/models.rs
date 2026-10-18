@@ -211,6 +211,22 @@ impl InstanceStatus {
         )
     }
 
+    pub fn can_clone(&self) -> bool {
+        !self.is_transitional()
+    }
+
+    pub fn can_snapshot(&self) -> bool {
+        !self.is_transitional()
+    }
+
+    pub fn can_configure(&self) -> bool {
+        !self.is_transitional()
+    }
+
+    pub fn can_delete(&self) -> bool {
+        !self.is_transitional()
+    }
+
     pub fn display_status(&self) -> String {
         match self {
             InstanceStatus::Stopped => "Stopped".to_string(),

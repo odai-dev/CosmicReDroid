@@ -70,6 +70,15 @@ impl DockerEngine {
         pull_image_stream(self.client.clone(), image)
     }
 
+    /// Pulls a container image with cancellation support.
+    pub fn pull_image_stream_cancellable(
+        &self,
+        image: String,
+        cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    ) -> MpscStream<ImageDownloadProgress> {
+        pull_image_stream_cancellable(self.client.clone(), image, Some(cancel_rx))
+    }
+
     /// Creates a ReDroid container configured according to the provided instance domain model.
     pub async fn create_instance_container(&self, instance: &AndroidInstance) -> Result<String> {
         create_container(&self.client, instance).await
@@ -363,10 +372,11 @@ pub async fn list_local_images(docker: &Docker) -> Result<HashSet<String>> {
     Ok(set)
 }
 
-/// Pulls a Docker image and streams detailed progress telemetry.
-pub fn pull_image_stream(
+/// Pulls a Docker image and streams detailed progress telemetry with explicit cancellation support.
+pub fn pull_image_stream_cancellable(
     docker: Docker,
     image: String,
+    mut cancel_rx: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> MpscStream<ImageDownloadProgress> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let img_clone = image.clone();
@@ -390,7 +400,28 @@ pub fn pull_image_stream(
             error: None,
         });
 
-        while let Some(item) = stream.next().await {
+        loop {
+            if tx.is_closed() {
+                debug!("Progress stream receiver dropped; aborting pull for {}", img_clone);
+                return;
+            }
+
+            let next_item = if let Some(ref mut cancel) = cancel_rx {
+                tokio::select! {
+                    _ = cancel => {
+                        info!("Docker pull for image '{}' cancelled by user", img_clone);
+                        return;
+                    }
+                    item = stream.next() => item,
+                }
+            } else {
+                stream.next().await
+            };
+
+            let Some(item) = next_item else {
+                break;
+            };
+
             match item {
                 Ok(info) => {
                     if let Some(err) = info.error {
@@ -473,6 +504,14 @@ pub fn pull_image_stream(
     MpscStream { rx }
 }
 
+/// Pulls a Docker image and streams detailed progress telemetry.
+pub fn pull_image_stream(
+    docker: Docker,
+    image: String,
+) -> MpscStream<ImageDownloadProgress> {
+    pull_image_stream_cancellable(docker, image, None)
+}
+
 /// Pulls a Docker image using Bollard and drives the progress stream until completion.
 pub async fn pull_image(docker: &Docker, image: &str) -> Result<()> {
     info!("Pulling Docker image: {}", image);
@@ -553,12 +592,27 @@ pub async fn create_instance_container(
 /// Starts an existing container.
 pub async fn start_container(docker: &Docker, container_name: &str) -> Result<()> {
     info!("Starting container '{}'", container_name);
-    docker
+    if let Ok(inspect) = docker.inspect_container(container_name, None::<InspectContainerOptions>).await {
+        if inspect.state.and_then(|s| s.running).unwrap_or(false) {
+            info!("Container '{}' is already running", container_name);
+            return Ok(());
+        }
+    }
+
+    match docker
         .start_container(container_name, None::<StartContainerOptions<String>>)
         .await
-        .with_context(|| format!("Failed to start container '{container_name}'"))?;
-    info!("Container '{}' started successfully", container_name);
-    Ok(())
+    {
+        Ok(_) => {
+            info!("Container '{}' started successfully", container_name);
+            Ok(())
+        }
+        Err(bollard::errors::Error::DockerResponseServerError { status_code: 304, .. }) => {
+            info!("Container '{}' was already started (304)", container_name);
+            Ok(())
+        }
+        Err(err) => Err(err).with_context(|| format!("Failed to start container '{container_name}'")),
+    }
 }
 
 /// Stops a running container with a specified timeout (default 10s).

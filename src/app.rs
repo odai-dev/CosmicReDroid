@@ -6,7 +6,7 @@ use crate::models::{
     ImageDownloadProgress, InstanceStatus, NavPage, ProxyConfig, SnapshotInfo,
 };
 use crate::ui::drawer::DrawerState;
-use crate::ui::image_hub::ImageFactoryState;
+use crate::ui::image_hub::{ImageFactoryPreset, ImageFactoryState, ImageHubTab};
 use cosmic::app::{context_drawer::ContextDrawer, Core, Task};
 use cosmic::iced::Alignment;
 use cosmic::widget::{self, nav_bar};
@@ -80,12 +80,16 @@ pub enum Message {
     SaveDrawerInstance,
 
     // Image Factory
+    ImageHubTabSelected(ImageHubTab),
     ImageFactoryVersionSelected(usize),
+    ImageFactoryPresetSelected(ImageFactoryPreset),
     ImageFactoryToggleLibndk(bool),
     ImageFactoryToggleGapps(bool),
     ImageFactoryToggleMagisk(bool),
+    ImageFactoryToggleDockerfilePreview,
     ImageFactoryStartBuild,
     ImageFactoryBuildFinished(Result<String, String>),
+    DeleteCustomImage(String),
 
     // Snapshots & Diagnostics
     RestoreSnapshot(Uuid),
@@ -831,37 +835,56 @@ impl Application for AppModel {
                 Task::none()
             }
 
+            Message::ImageHubTabSelected(tab) => {
+                self.image_factory.current_tab = tab;
+                Task::none()
+            }
+
+            Message::ImageFactoryPresetSelected(preset) => {
+                self.image_factory.apply_preset(preset);
+                Task::none()
+            }
+
+            Message::ImageFactoryToggleDockerfilePreview => {
+                self.image_factory.is_dockerfile_expanded =
+                    !self.image_factory.is_dockerfile_expanded;
+                Task::none()
+            }
+
             Message::ImageFactoryToggleLibndk(val) => {
                 self.image_factory.include_libndk = val;
+                self.image_factory.active_preset = ImageFactoryPreset::Custom;
                 Task::none()
             }
 
             Message::ImageFactoryToggleGapps(val) => {
                 self.image_factory.include_gapps = val;
+                self.image_factory.active_preset = ImageFactoryPreset::Custom;
                 Task::none()
             }
 
             Message::ImageFactoryToggleMagisk(val) => {
                 self.image_factory.include_magisk = val;
+                self.image_factory.active_preset = ImageFactoryPreset::Custom;
                 Task::none()
             }
 
             Message::ImageFactoryStartBuild => {
                 self.image_factory.is_building = true;
-                self.image_factory
-                    .build_logs
-                    .push("Starting asynchronous container build...".into());
+                let tag = self.image_factory.target_image_tag();
+                self.image_factory.build_logs.push(format!(
+                    "Starting asynchronous build for target tag: {tag}..."
+                ));
 
                 let dockerfile = self.image_factory.generate_dockerfile();
-                let tag = format!(
-                    "cosmic-redroid-custom:{}",
-                    self.image_factory.selected_version.short_name().to_lowercase()
-                );
 
                 Task::perform(
                     async move {
-                        let temp_dir = std::env::temp_dir().join(format!("build_{}", Uuid::new_v4()));
-                        tokio::fs::create_dir_all(&temp_dir).await.map_err(|e| e.to_string())?;
+                        let temp_dir =
+                            std::env::temp_dir().join(format!("build_{}", Uuid::new_v4()));
+                        tokio::fs::create_dir_all(&temp_dir)
+                            .await
+                            .map_err(|e| e.to_string())?;
                         tokio::fs::write(temp_dir.join("Dockerfile"), dockerfile)
                             .await
                             .map_err(|e| e.to_string())?;
@@ -885,13 +908,44 @@ impl Application for AppModel {
             Message::ImageFactoryBuildFinished(res) => {
                 self.image_factory.is_building = false;
                 match res {
-                    Ok(msg) => self.image_factory.build_logs.push(msg),
-                    Err(err) => self
-                        .image_factory
-                        .build_logs
-                        .push(format!("Build failed: {err}")),
+                    Ok(msg) => {
+                        self.image_factory.build_logs.push(msg);
+                        return Task::perform(
+                            async {
+                                if let Ok(engine) = crate::backend::docker::DockerEngine::new() {
+                                    engine.list_local_images().await.unwrap_or_default()
+                                } else {
+                                    HashSet::new()
+                                }
+                            },
+                            |images| Action::App(Message::LocalImagesRefreshed(images)),
+                        );
+                    }
+                    Err(err) => {
+                        self.image_factory
+                            .build_logs
+                            .push(format!("Build failed: {err}"));
+                    }
                 }
                 Task::none()
+            }
+
+            Message::DeleteCustomImage(tag) => {
+                self.available_images.remove(&tag);
+                Task::perform(
+                    async move {
+                        let mut cmd = tokio::process::Command::new("docker");
+                        cmd.arg("rmi").arg("-f").arg(&tag);
+                        let _ = cmd.output().await;
+
+                        if let Ok(engine) = crate::backend::docker::DockerEngine::new() {
+                            engine.list_local_images().await.unwrap_or_default()
+                        } else {
+                            HashSet::new()
+                        }
+                    },
+                    |images| Action::App(Message::LocalImagesRefreshed(images)),
+                )
             }
 
             // Snapshots & Remediation

@@ -26,7 +26,14 @@ enum InstancesStorage {
 }
 
 /// Returns the configuration directory path for CosmicReDroid (~/.local/share/cosmic-redroid).
+///
+/// Can be overridden via the `COSMIC_REDROID_DATA_DIR` environment variable for hermetic testing.
 pub fn config_dir() -> Result<PathBuf> {
+    if let Ok(override_dir) = std::env::var("COSMIC_REDROID_DATA_DIR") {
+        if !override_dir.trim().is_empty() {
+            return Ok(PathBuf::from(override_dir));
+        }
+    }
     let base_dir = dirs::data_local_dir()
         .ok_or_else(|| anyhow::anyhow!("Failed to resolve local data directory"))?;
     Ok(base_dir.join("cosmic-redroid"))
@@ -161,11 +168,17 @@ pub fn load_instances_from_path(target_path: &Path) -> Result<Vec<AndroidInstanc
     match serde_json::from_str::<InstancesStorage>(&content) {
         Ok(InstancesStorage::Instances(instances)) => Ok(instances),
         Ok(InstancesStorage::Config(cfg)) => Ok(cfg.instances),
-        Err(err) => Err(anyhow::anyhow!(
-            "Failed to parse instances JSON at '{}': {}",
-            target_path.display(),
-            err
-        )),
+        Err(err) => {
+            let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+            let backup_path = target_path.with_extension(format!("corrupt.{}.json", timestamp));
+            let _ = std::fs::copy(target_path, &backup_path);
+            Err(anyhow::anyhow!(
+                "Failed to parse instances JSON at '{}': {}. Preserved original corrupt file at '{}'",
+                target_path.display(),
+                err,
+                backup_path.display()
+            ))
+        }
     }
 }
 
@@ -250,11 +263,17 @@ pub fn load_config_from_path(target_path: &Path) -> Result<AppConfig> {
             instances,
             active_page: Some(NavPage::Instances),
         }),
-        Err(err) => Err(anyhow::anyhow!(
-            "Failed to parse configuration JSON at '{}': {}",
-            target_path.display(),
-            err
-        )),
+        Err(err) => {
+            let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+            let backup_path = target_path.with_extension(format!("corrupt.{}.json", timestamp));
+            let _ = std::fs::copy(target_path, &backup_path);
+            Err(anyhow::anyhow!(
+                "Failed to parse configuration JSON at '{}': {}. Preserved original corrupt file at '{}'",
+                target_path.display(),
+                err,
+                backup_path.display()
+            ))
+        }
     }
 }
 

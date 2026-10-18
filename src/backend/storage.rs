@@ -28,18 +28,23 @@ pub const ADB_PORT_BASE: u16 = 5555;
 pub const ADB_PORT_STEP: u16 = 2;
 
 /// Checks if a TCP port is available for local binding on 127.0.0.1.
-fn is_port_available(port: u16) -> bool {
+pub fn is_port_available(port: u16) -> bool {
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
-/// Finds the next available ADB port starting from 5555 with step 2.
+/// Finds the next available ADB port using a custom port probe function.
 ///
 /// Verifies both that the candidate port is not present in `existing_ports`
-/// and that `127.0.0.1:{port}` can be bound via `TcpListener`.
-pub fn find_next_adb_port(existing_ports: &[u16]) -> u16 {
+/// and that `is_available(candidate)` returns true.
+/// If all candidates fail the probe (e.g., in a sandboxed test environment without socket bind permissions),
+/// it safely falls back to the lowest candidate >= ADB_PORT_BASE not present in `existing_ports`.
+pub fn find_next_adb_port_with_probe<F>(existing_ports: &[u16], mut is_available: F) -> u16
+where
+    F: FnMut(u16) -> bool,
+{
     let mut candidate = ADB_PORT_BASE;
     loop {
-        if !existing_ports.contains(&candidate) && is_port_available(candidate) {
+        if !existing_ports.contains(&candidate) && is_available(candidate) {
             debug!("Selected available ADB port: {}", candidate);
             return candidate;
         }
@@ -47,11 +52,34 @@ pub fn find_next_adb_port(existing_ports: &[u16]) -> u16 {
         match candidate.checked_add(ADB_PORT_STEP) {
             Some(next) => candidate = next,
             None => {
-                warn!("ADB port range exhausted, falling back to {}", ADB_PORT_BASE);
-                return ADB_PORT_BASE;
+                warn!("ADB port range exhausted or socket check failed on all candidates");
+                let mut fallback = ADB_PORT_BASE;
+                while existing_ports.contains(&fallback) {
+                    match fallback.checked_add(ADB_PORT_STEP) {
+                        Some(next) => fallback = next,
+                        None => {
+                            for p in 1024..=65535 {
+                                if !existing_ports.contains(&p) {
+                                    return p;
+                                }
+                            }
+                            return ADB_PORT_BASE;
+                        }
+                    }
+                }
+                debug!("Allocated fallback ADB port avoiding existing ports: {}", fallback);
+                return fallback;
             }
         }
     }
+}
+
+/// Finds the next available ADB port starting from 5555 with step 2.
+///
+/// Verifies both that the candidate port is not present in `existing_ports`
+/// and that `127.0.0.1:{port}` can be bound via `TcpListener`.
+pub fn find_next_adb_port(existing_ports: &[u16]) -> u16 {
+    find_next_adb_port_with_probe(existing_ports, is_port_available)
 }
 
 /// Finds the lowest non-negative integer binder index not present in `existing_indices`.
@@ -318,7 +346,9 @@ pub async fn create_snapshot(
 
 /// Restores an instance data volume from a `.tar.zst` snapshot archive.
 ///
-/// Cleans existing contents in `data_path` and unpacks archive via `tar -I zstd -xf ...`.
+/// Extracts the archive into a staged temporary directory first to verify integrity;
+/// only upon verified extraction is the live `data_path` atomically swapped.
+/// If extraction fails (e.g. corrupted archive), the original `data_path` remains untouched.
 pub async fn restore_snapshot(snapshot: &SnapshotInfo, data_path: &Path) -> Result<()> {
     if !snapshot.archive_path.exists() {
         anyhow::bail!(
@@ -334,53 +364,71 @@ pub async fn restore_snapshot(snapshot: &SnapshotInfo, data_path: &Path) -> Resu
         data_path.display()
     );
 
-    if data_path.exists() {
-        debug!("Cleaning existing files in target data directory");
-        let mut read_dir = tokio::fs::read_dir(data_path).await.with_context(|| {
-            format!("Failed to read target data directory: {}", data_path.display())
-        })?;
+    let parent_dir = data_path.parent().unwrap_or_else(|| Path::new("."));
+    tokio::fs::create_dir_all(parent_dir).await.with_context(|| {
+        format!(
+            "Failed to create parent directory for restore: {}",
+            parent_dir.display()
+        )
+    })?;
 
-        while let Some(entry) = read_dir.next_entry().await? {
-            let path = entry.path();
-            let file_type = entry.file_type().await?;
-            if file_type.is_dir() {
-                tokio::fs::remove_dir_all(&path).await.with_context(|| {
-                    format!("Failed to remove directory entry: {}", path.display())
-                })?;
-            } else {
-                tokio::fs::remove_file(&path).await.with_context(|| {
-                    format!("Failed to remove file entry: {}", path.display())
-                })?;
-            }
-        }
-    } else {
-        tokio::fs::create_dir_all(data_path).await.with_context(|| {
-            format!(
-                "Failed to create target data directory: {}",
-                data_path.display()
-            )
-        })?;
-    }
+    let staging_dir = parent_dir.join(format!(".restore_staging_{}_{}", Uuid::new_v4().simple(), snapshot.id.simple()));
+    tokio::fs::create_dir_all(&staging_dir).await.with_context(|| {
+        format!(
+            "Failed to create staging directory for restore: {}",
+            staging_dir.display()
+        )
+    })?;
 
-    let output = Command::new("tar")
+    let output_res = Command::new("tar")
         .arg("-I")
         .arg("zstd")
         .arg("-xf")
         .arg(&snapshot.archive_path)
         .arg("-C")
-        .arg(data_path)
+        .arg(&staging_dir)
         .output()
         .await
-        .with_context(|| "Failed to execute tar command for snapshot restoration")?;
+        .with_context(|| "Failed to execute tar command for snapshot restoration");
+
+    let output = match output_res {
+        Ok(out) => out,
+        Err(err) => {
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+            return Err(err);
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
         error!("tar snapshot extraction failed: {}", stderr);
         anyhow::bail!(
             "Failed to extract snapshot archive (status {}): {}",
             output.status,
             stderr.trim()
         );
+    }
+
+    // Staged extraction succeeded; perform safe replacement of live data directory
+    if data_path.exists() {
+        let backup_dir = parent_dir.join(format!(".restore_backup_{}_{}", Uuid::new_v4().simple(), snapshot.id.simple()));
+        if let Err(e) = tokio::fs::rename(data_path, &backup_dir).await {
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+            anyhow::bail!("Failed to backup existing data directory: {e}");
+        }
+        if let Err(e) = tokio::fs::rename(&staging_dir, data_path).await {
+            // Restore previous data directory from backup on swap failure
+            let _ = tokio::fs::rename(&backup_dir, data_path).await;
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+            anyhow::bail!("Failed to move staging directory into place: {e}");
+        }
+        let _ = tokio::fs::remove_dir_all(&backup_dir).await;
+    } else {
+        if let Err(e) = tokio::fs::rename(&staging_dir, data_path).await {
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+            anyhow::bail!("Failed to move staging directory into place: {e}");
+        }
     }
 
     info!("Snapshot restoration completed successfully");
