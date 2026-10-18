@@ -196,15 +196,17 @@ pub async fn probe_scrcpy() -> (bool, String) {
 
 /// Probes whether the filesystem hosting instance storage supports instant Copy-on-Write (reflink) cloning.
 pub async fn probe_reflink() -> (bool, String) {
-    let test_dir = crate::config::config_dir()
+    let base_dir = crate::config::config_dir()
         .unwrap_or_else(|_| std::env::temp_dir().join("cosmic-redroid"));
-    let _ = tokio::fs::create_dir_all(&test_dir).await;
+    let probe_dir = base_dir.join(".probe_reflink");
+    let _ = tokio::fs::create_dir_all(&probe_dir).await;
 
     let test_id = uuid::Uuid::new_v4();
-    let src_file = test_dir.join(format!(".reflink_test_src_{}.tmp", test_id));
-    let dst_file = test_dir.join(format!(".reflink_test_dst_{}.tmp", test_id));
+    let src_file = probe_dir.join(format!(".reflink_test_src_{}.tmp", test_id));
+    let dst_file = probe_dir.join(format!(".reflink_test_dst_{}.tmp", test_id));
 
     if let Err(err) = tokio::fs::write(&src_file, b"cosmic-redroid-reflink-probe").await {
+        let _ = tokio::fs::remove_dir(&probe_dir).await;
         return (
             false,
             format!("Failed to create temporary file for reflink probe: {}", err),
@@ -220,6 +222,7 @@ pub async fn probe_reflink() -> (bool, String) {
 
     let _ = tokio::fs::remove_file(&src_file).await;
     let _ = tokio::fs::remove_file(&dst_file).await;
+    let _ = tokio::fs::remove_dir(&probe_dir).await;
 
     match result {
         Ok(output) if output.status.success() => (

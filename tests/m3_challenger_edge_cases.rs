@@ -592,16 +592,34 @@ async fn test_host_probes_individual_resilience() {
     let (_reflink_ok, reflink_msg) = probe_reflink().await;
     assert!(!reflink_msg.is_empty(), "probe_reflink must return diagnostic string");
 
-    // Verify probe_reflink left no orphaned .reflink_test_* files in test dir
+    // Verify probe_reflink left no orphaned .reflink_test_* files in root config directory
     let config_dir = crate::config::config_dir().unwrap_or_else(|_| std::env::temp_dir().join("cosmic-redroid"));
     if config_dir.exists() {
         for entry in fs::read_dir(&config_dir).unwrap().flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
             assert!(
                 !name.starts_with(".reflink_test_"),
-                "probe_reflink must clean up temporary probe file: {}",
+                "probe_reflink must not leave temporary probe files in config root: {}",
                 name
             );
+        }
+    }
+
+    // Verify isolated probe directory does not accumulate stale orphaned files
+    let probe_dir = config_dir.join(".probe_reflink");
+    if probe_dir.exists() {
+        for entry in fs::read_dir(&probe_dir).unwrap().flatten() {
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    if let Ok(elapsed) = modified.elapsed() {
+                        assert!(
+                            elapsed.as_secs() < 10,
+                            "probe_reflink must not leave stale orphaned files in probe_dir: {:?}",
+                            entry.file_name()
+                        );
+                    }
+                }
+            }
         }
     }
 }
