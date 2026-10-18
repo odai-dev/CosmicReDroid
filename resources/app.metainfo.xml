@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.system76.CosmicRedroid</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>CosmicReDroid</name>
+  <summary>Native Linux Android Multi-Instance Control Center</summary>
+  <description>
+    <p>
+      CosmicReDroid is a high-performance native Linux Android multi-instance management suite
+      designed for System76 COSMIC desktop environment, powered by ReDroid containers,
+      hardware identity spoofing, and scrcpy display streaming.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Automated Docker container lifecycle management for ReDroid instances</li>
+      <li>Deterministic multi-instance binder isolation and DRI GPU acceleration</li>
+      <li>Hardware spoofing with valid IMEIs, MAC addresses, and Android IDs</li>
+      <li>Copy-on-Write (CoW) instance cloning and zstd snapshot management</li>
+      <li>Integrated Image Factory for building custom ReDroid images</li>
+      <li>Host system diagnostics and automated permission remediation</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">com.system76.CosmicRedroid.desktop</launchable>
+  <url type="homepage">https://github.com/pop-os/cosmic-redroid</url>
+  <url type="bugtracker">https://github.com/pop-os/cosmic-redroid/issues</url>
+  <provides>
+    <binary>cosmic-redroid</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-10-18">
+      <description>
+        <p>Initial release of CosmicReDroid for the COSMIC desktop environment.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1"/>
+  <developer id="com.system76">
+    <name>System76 / CosmicReDroid Contributors</name>
+  </developer>
+</component>

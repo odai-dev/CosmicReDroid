@@ -1,0 +1,11 @@
+# Rust build artifacts
+target/
+
+# Teamwork agent metadata & scratchpads
+.agents/
+
+# IDE and Editor configurations
+.vscode/
+.idea/
+*.swp
+*.bak

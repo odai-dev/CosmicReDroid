@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=CosmicReDroid
+Comment=Native Linux Android Multi-Instance Control Center
+Exec=cosmic-redroid
+Icon=com.system76.CosmicRedroid
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=Utility;System;Emulator;
+Keywords=Android;ReDroid;Emulator;Container;Instance;Docker;scrcpy;

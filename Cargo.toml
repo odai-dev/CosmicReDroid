@@ -1,0 +1,57 @@
+[package]
+name = "cosmic-redroid"
+version = "0.1.0"
+edition = "2021"
+authors = ["CosmicReDroid Contributors"]
+description = "Native Linux Android Multi-Instance Control Center"
+license = "GPL-3.0-only"
+repository = "https://github.com/pop-os/cosmic-redroid"
+readme = "README.md"
+
+[dependencies]
+# Docker Engine Client
+bollard = "0.18"
+
+# Asynchronous Runtimes & Streaming
+futures-util = "0.3"
+tokio = { version = "1.40", features = ["full", "process", "fs", "sync", "time", "io-util"] }
+
+# Data Serialization & Deserialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Unique Identifiers & Randomization
+uuid = { version = "1.10", features = ["v4", "serde"] }
+rand = "0.8"
+
+# Time, Date & Diagnostics
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# System Integration & OS Paths
+dirs = "5.0"
+open = "5.0"
+once_cell = "1.19"
+
+# Internationalization & Embedded Assets
+i18n-embed = { version = "0.14", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.8"
+rust-embed = "8.3"
+
+# System76 COSMIC GUI Toolkit
+libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false, features = [
+    "tokio",
+    "wayland",
+    "wgpu",
+    "dbus-config",
+    "single-instance"
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

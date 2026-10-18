@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f2430"/>
+      <stop offset="100%" stop-color="#10131a"/>
+    </linearGradient>
+    <linearGradient id="accent-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#48b9c7"/>
+      <stop offset="100%" stop-color="#2a7b88"/>
+    </linearGradient>
+    <linearGradient id="droid-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5ec492"/>
+      <stop offset="100%" stop-color="#3b9668"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Base -->
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg-grad)" stroke="#2b3342" stroke-width="2"/>
+
+  <!-- Cosmic Orbit Ring -->
+  <circle cx="64" cy="64" r="44" fill="none" stroke="url(#accent-grad)" stroke-width="3" stroke-dasharray="6 4" opacity="0.6"/>
+
+  <!-- Android Dome / Head -->
+  <path d="M 40 56 A 24 24 0 0 1 88 56 Z" fill="url(#droid-grad)"/>
+
+  <!-- Antennas -->
+  <line x1="48" y1="36" x2="43" y2="28" stroke="url(#droid-grad)" stroke-width="3" stroke-linecap="round"/>
+  <line x1="80" y1="36" x2="85" y2="28" stroke="url(#droid-grad)" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Eyes -->
+  <circle cx="50" cy="48" r="3" fill="#10131a"/>
+  <circle cx="78" cy="48" r="3" fill="#10131a"/>
+
+  <!-- Multi-Instance Stack Plates -->
+  <rect x="36" y="62" width="56" height="6" rx="3" fill="url(#droid-grad)"/>
+  <rect x="32" y="72" width="64" height="6" rx="3" fill="url(#accent-grad)"/>
+  <rect x="28" y="82" width="72" height="6" rx="3" fill="#3a8299"/>
+  <rect x="44" y="92" width="40" height="4" rx="2" fill="#52637a"/>
+</svg>
