@@ -278,21 +278,26 @@ pub async fn run_host_diagnostics() -> HostHealthReport {
 
 /// Returns the shell remediation script executed with elevated privileges via pkexec.
 pub fn generate_remediation_script() -> &'static str {
-    r#"set -e
-# 1. Mount binderfs if not already mounted
+    r#"#!/bin/bash
+set -e
+# 1. Load binder kernel module if available
+modprobe binder_linux 2>/dev/null || true
+
+# 2. Mount binderfs if not already mounted
 mkdir -p /dev/binderfs
 mount -t binder binder /dev/binderfs -o stats=global 2>/dev/null || true
 
-# 2. Symlink standard nodes if present in binderfs
+# 3. Symlink standard nodes if present in binderfs
 [ -e /dev/binderfs/binder ] && ln -sf /dev/binderfs/binder /dev/binder
 [ -e /dev/binderfs/hwbinder ] && ln -sf /dev/binderfs/hwbinder /dev/hwbinder
 [ -e /dev/binderfs/vndbinder ] && ln -sf /dev/binderfs/vndbinder /dev/vndbinder
 
-# 3. Ensure permissive access for unprivileged containers
+# 4. Ensure permissive access for unprivileged containers
 chmod 666 /dev/binder /dev/hwbinder /dev/vndbinder /dev/binderfs/* 2>/dev/null || true
+chmod 666 /dev/binder* 2>/dev/null || true
 chmod 666 /dev/dri/renderD* 2>/dev/null || true
 
-# 4. Ensure user groups for docker and render
+# 5. Ensure user groups for docker and render
 TARGET_USER="${SUDO_USER:-$USER}"
 if [ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ]; then
     getent group docker >/dev/null && usermod -aG docker "$TARGET_USER" || true
@@ -333,11 +338,12 @@ mod tests {
     #[test]
     fn test_generate_remediation_script_content() {
         let script = generate_remediation_script();
+        assert!(script.starts_with("#!/bin/bash\nset -e\n"));
+        assert!(script.contains("modprobe binder_linux"));
         assert!(script.contains("mount -t binder binder /dev/binderfs"));
         assert!(script.contains("chmod 666 /dev/binder"));
         assert!(script.contains("usermod -aG docker"));
         assert!(script.contains("usermod -aG render"));
-        assert!(script.starts_with("set -e"));
     }
 
     #[tokio::test]
