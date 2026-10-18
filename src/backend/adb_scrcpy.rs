@@ -324,6 +324,9 @@ pub fn spawn_scrcpy(
         port, title, max_fps, bitrate_mbps
     );
     let mut cmd = build_scrcpy_command(port, title, max_fps, bitrate_mbps);
+    // ReDroid guest images include OMX AAC audio encoder rather than Opus.
+    // Configure AAC to prevent scrcpy 2.0+ from aborting on missing opus encoder.
+    cmd.arg("--audio-codec=aac");
 
     let child = cmd
         .spawn()

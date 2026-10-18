@@ -517,8 +517,21 @@ impl Application for AppModel {
             }
 
             Message::OpenScreen(id) => {
-                if let Some(inst) = self.config.instances.iter().find(|i| i.id == id) {
-                    let _ = crate::backend::adb_scrcpy::spawn_scrcpy_for_instance(inst);
+                if let Some(inst) = self.config.instances.iter().find(|i| i.id == id).cloned() {
+                    return Task::perform(
+                        async move {
+                            let _ = crate::backend::adb_scrcpy::adb_connect(inst.adb_port).await;
+                            crate::backend::adb_scrcpy::spawn_scrcpy_for_instance(&inst)
+                                .map(|_| ())
+                                .map_err(|e| e.to_string())
+                        },
+                        |res| {
+                            if let Err(e) = res {
+                                tracing::error!("Failed to open scrcpy screen: {e}");
+                            }
+                            Action::App(Message::PeriodicTick)
+                        },
+                    );
                 }
                 Task::none()
             }
