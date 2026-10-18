@@ -29,3 +29,31 @@ macro_rules! fl {
         i18n_embed_fl::fl!($crate::i18n::language_loader(), $message_id, $($args)*)
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_i18n_catalog_load() {
+        let _ = language_loader();
+        let title = crate::fl!("app-title");
+        assert_eq!(title, "CosmicReDroid");
+    }
+
+    #[test]
+    fn test_i18n_message_with_args() {
+        let _ = language_loader();
+        let active = crate::fl!("active-containers", count = 3);
+        assert!(active.contains("Active Containers:"));
+        assert!(active.contains('3'));
+    }
+
+    #[test]
+    fn test_i18n_common_keys() {
+        let _ = language_loader();
+        assert_eq!(crate::fl!("nav-instances"), "Instances");
+        assert_eq!(crate::fl!("btn-start"), "Start");
+        assert_eq!(crate::fl!("host-health-title"), "Host System Diagnostics");
+    }
+}

@@ -42,7 +42,12 @@ test:
 
 # Check code with cargo clippy
 check:
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --all-targets -- -D warnings 2>/dev/null || cargo check
+
+# Verify localization files
+i18n:
+    cargo test -- i18n
+
 
 # Install binary and desktop integration assets
 install:

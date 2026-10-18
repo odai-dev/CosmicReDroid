@@ -7,6 +7,7 @@ pub struct AppModel {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     None,
 }
@@ -33,7 +34,7 @@ impl Application for AppModel {
         Task::none()
     }
 
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         widget::text(crate::fl!("app-title")).into()
     }
 }
