@@ -2,10 +2,12 @@
 // Subsystem: Docker Container Engine via Bollard 0.18
 // Strict zero-emoji compliance.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-use anyhow::{Context, Result};
+use anyhow::{Context as AnyhowContext, Result};
 use bollard::container::{
     Config, CreateContainerOptions, InspectContainerOptions, RemoveContainerOptions,
     StartContainerOptions, Stats, StatsOptions, StopContainerOptions,
@@ -13,10 +15,10 @@ use bollard::container::{
 use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, DeviceMapping, HostConfig, PortBinding, PortMap};
 use bollard::Docker;
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use tracing::{debug, info, warn};
 
-use crate::models::{AndroidInstance, ContainerMetrics};
+use crate::models::{AndroidInstance, ContainerMetrics, ImageDownloadProgress};
 
 /// High-level wrapper around the Bollard Docker client.
 #[derive(Clone, Debug)]
@@ -56,6 +58,16 @@ impl DockerEngine {
     /// Pulls a container image, streaming progress until completion.
     pub async fn pull_image(&self, image: &str) -> Result<()> {
         pull_image(&self.client, image).await
+    }
+
+    /// Lists all locally cached Docker image repository tags.
+    pub async fn list_local_images(&self) -> Result<HashSet<String>> {
+        list_local_images(&self.client).await
+    }
+
+    /// Pulls a container image, streaming reactive progress updates until completion.
+    pub fn pull_image_stream(&self, image: String) -> MpscStream<ImageDownloadProgress> {
+        pull_image_stream(self.client.clone(), image)
     }
 
     /// Creates a ReDroid container configured according to the provided instance domain model.
@@ -322,6 +334,143 @@ pub fn build_container_config_with_root(
 /// Constructs the complete Bollard container Config for container creation.
 pub fn build_container_config(instance: &AndroidInstance) -> Config<String> {
     build_container_config_with_root(instance, Path::new("/"))
+}
+
+/// Reactive Stream wrapper for an unbounded Tokio mpsc receiver.
+pub struct MpscStream<T> {
+    rx: tokio::sync::mpsc::UnboundedReceiver<T>,
+}
+
+impl<T> Stream for MpscStream<T> {
+    type Item = T;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.rx.poll_recv(cx)
+    }
+}
+
+/// Lists all locally cached Docker image repository tags.
+pub async fn list_local_images(docker: &Docker) -> Result<HashSet<String>> {
+    let images = docker
+        .list_images(None::<bollard::image::ListImagesOptions<String>>)
+        .await
+        .context("Failed to list local Docker images")?;
+    let mut set = HashSet::new();
+    for img in images {
+        for tag in img.repo_tags {
+            set.insert(tag);
+        }
+    }
+    Ok(set)
+}
+
+/// Pulls a Docker image and streams detailed progress telemetry.
+pub fn pull_image_stream(
+    docker: Docker,
+    image: String,
+) -> MpscStream<ImageDownloadProgress> {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    let img_clone = image.clone();
+
+    tokio::spawn(async move {
+        let options = Some(CreateImageOptions {
+            from_image: img_clone.clone(),
+            ..Default::default()
+        });
+
+        let mut layers: HashMap<String, (u64, u64)> = HashMap::new();
+        let mut stream = docker.create_image(options, None, None);
+
+        let _ = tx.send(ImageDownloadProgress {
+            image_tag: img_clone.clone(),
+            status_text: "Contacting Docker registry...".to_string(),
+            current_bytes: 0,
+            total_bytes: 0,
+            progress_fraction: 0.0,
+            is_complete: false,
+            error: None,
+        });
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(info) => {
+                    if let Some(err) = info.error {
+                        let _ = tx.send(ImageDownloadProgress {
+                            image_tag: img_clone.clone(),
+                            status_text: "Download failed".to_string(),
+                            current_bytes: 0,
+                            total_bytes: 0,
+                            progress_fraction: 0.0,
+                            is_complete: false,
+                            error: Some(err),
+                        });
+                        return;
+                    }
+
+                    let status = info.status.unwrap_or_default();
+                    let layer_id = info.id.unwrap_or_default();
+
+                    if let Some(detail) = info.progress_detail {
+                        let current = detail.current.unwrap_or(0).max(0) as u64;
+                        let total = detail.total.unwrap_or(0).max(0) as u64;
+                        if !layer_id.is_empty() && total > 0 {
+                            layers.insert(layer_id, (current, total));
+                        }
+                    }
+
+                    let sum_current: u64 = layers.values().map(|(c, _)| *c).sum();
+                    let sum_total: u64 = layers.values().map(|(_, t)| *t).sum();
+                    let fraction = if sum_total > 0 {
+                        (sum_current as f32 / sum_total as f32).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    };
+
+                    let _ = tx.send(ImageDownloadProgress {
+                        image_tag: img_clone.clone(),
+                        status_text: if status.is_empty() { "Downloading...".into() } else { status },
+                        current_bytes: sum_current,
+                        total_bytes: sum_total,
+                        progress_fraction: fraction,
+                        is_complete: false,
+                        error: None,
+                    });
+                }
+                Err(err) => {
+                    let err_msg = format!("{err:#}");
+                    let friendly_err = if err_msg.contains("connection reset")
+                        || err_msg.contains("Temporary failure in name resolution")
+                    {
+                        format!("Network failure connecting to Docker registry: {err_msg}")
+                    } else {
+                        format!("Docker pull error: {err_msg}")
+                    };
+
+                    let _ = tx.send(ImageDownloadProgress {
+                        image_tag: img_clone.clone(),
+                        status_text: "Network error".to_string(),
+                        current_bytes: 0,
+                        total_bytes: 0,
+                        progress_fraction: 0.0,
+                        is_complete: false,
+                        error: Some(friendly_err),
+                    });
+                    return;
+                }
+            }
+        }
+
+        let _ = tx.send(ImageDownloadProgress {
+            image_tag: img_clone,
+            status_text: "Download complete".to_string(),
+            current_bytes: 1,
+            total_bytes: 1,
+            progress_fraction: 1.0,
+            is_complete: true,
+            error: None,
+        });
+    });
+
+    MpscStream { rx }
 }
 
 /// Pulls a Docker image using Bollard and drives the progress stream until completion.

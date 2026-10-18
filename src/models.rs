@@ -159,6 +159,7 @@ impl DevicePreset {
 pub enum InstanceStatus {
     #[default]
     Stopped,
+    DownloadingImage(String),
     Starting,
     WaitingForBoot,
     Running,
@@ -176,7 +177,8 @@ impl InstanceStatus {
     pub fn is_active(&self) -> bool {
         matches!(
             self,
-            InstanceStatus::Starting
+            InstanceStatus::DownloadingImage(_)
+                | InstanceStatus::Starting
                 | InstanceStatus::WaitingForBoot
                 | InstanceStatus::Running
                 | InstanceStatus::Stopping
@@ -186,7 +188,8 @@ impl InstanceStatus {
     pub fn is_transitional(&self) -> bool {
         matches!(
             self,
-            InstanceStatus::Starting
+            InstanceStatus::DownloadingImage(_)
+                | InstanceStatus::Starting
                 | InstanceStatus::WaitingForBoot
                 | InstanceStatus::Stopping
                 | InstanceStatus::Cloning
@@ -204,12 +207,20 @@ impl InstanceStatus {
             InstanceStatus::Running
                 | InstanceStatus::Starting
                 | InstanceStatus::WaitingForBoot
+                | InstanceStatus::DownloadingImage(_)
         )
     }
 
     pub fn display_status(&self) -> String {
         match self {
             InstanceStatus::Stopped => "Stopped".to_string(),
+            InstanceStatus::DownloadingImage(desc) => {
+                if desc.is_empty() {
+                    "Downloading image...".to_string()
+                } else {
+                    desc.clone()
+                }
+            }
             InstanceStatus::Starting => "Starting...".to_string(),
             InstanceStatus::WaitingForBoot => "Booting Android...".to_string(),
             InstanceStatus::Running => "Running".to_string(),
@@ -227,12 +238,62 @@ impl InstanceStatus {
     pub fn status_icon_name(&self) -> &'static str {
         match self {
             InstanceStatus::Stopped => "media-playback-stop-symbolic",
+            InstanceStatus::DownloadingImage(_) => "folder-download-symbolic",
             InstanceStatus::Starting | InstanceStatus::WaitingForBoot => "system-run-symbolic",
             InstanceStatus::Running => "media-playback-start-symbolic",
             InstanceStatus::Stopping => "process-stop-symbolic",
             InstanceStatus::Cloning => "edit-copy-symbolic",
             InstanceStatus::Snapshotting => "camera-photo-symbolic",
             InstanceStatus::Error(_) => "dialog-error-symbolic",
+        }
+    }
+}
+
+/// Progress telemetry for a container image download.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageDownloadProgress {
+    pub image_tag: String,
+    pub status_text: String,
+    pub current_bytes: u64,
+    pub total_bytes: u64,
+    pub progress_fraction: f32,
+    pub is_complete: bool,
+    pub error: Option<String>,
+}
+
+impl Default for ImageDownloadProgress {
+    fn default() -> Self {
+        Self {
+            image_tag: String::new(),
+            status_text: String::new(),
+            current_bytes: 0,
+            total_bytes: 0,
+            progress_fraction: 0.0,
+            is_complete: false,
+            error: None,
+        }
+    }
+}
+
+impl ImageDownloadProgress {
+    pub fn new(image_tag: impl Into<String>) -> Self {
+        Self {
+            image_tag: image_tag.into(),
+            status_text: "Contacting registry...".to_string(),
+            ..Default::default()
+        }
+    }
+
+    pub fn formatted_progress(&self) -> String {
+        if self.total_bytes > 0 {
+            let current_mb = (self.current_bytes as f64) / (1024.0 * 1024.0);
+            let total_mb = (self.total_bytes as f64) / (1024.0 * 1024.0);
+            let percent = (self.progress_fraction * 100.0).clamp(0.0, 100.0) as u32;
+            format!("{:.1} MB / {:.1} MB ({}%)", current_mb, total_mb, percent)
+        } else if !self.status_text.is_empty() {
+            self.status_text.clone()
+        } else {
+            "Downloading...".to_string()
         }
     }
 }
@@ -653,10 +714,50 @@ mod tests {
             "dialog-error-symbolic"
         );
 
+        let dl = InstanceStatus::DownloadingImage("45.2 MB / 838.4 MB (5%)".to_string());
+        assert!(dl.is_transitional());
+        assert!(dl.is_active());
+        assert!(!dl.can_start());
+        assert!(dl.can_stop());
+        assert_eq!(dl.display_status(), "45.2 MB / 838.4 MB (5%)");
+        assert_eq!(dl.status_icon_name(), "folder-download-symbolic");
+
         let err_status = InstanceStatus::Error("Disk full".to_string());
         let serialized = serde_json::to_string(&err_status).expect("serialize");
         let deserialized: InstanceStatus = serde_json::from_str(&serialized).expect("deserialize");
         assert_eq!(deserialized, err_status);
+    }
+
+    #[test]
+    fn test_image_download_progress_formatting_and_lifecycle() {
+        let mut prog = ImageDownloadProgress::new("redroid/redroid:13.0.0-latest");
+        assert_eq!(prog.image_tag, "redroid/redroid:13.0.0-latest");
+        assert_eq!(prog.current_bytes, 0);
+        assert_eq!(prog.total_bytes, 0);
+        assert_eq!(prog.progress_fraction, 0.0);
+        assert!(!prog.is_complete);
+        assert_eq!(prog.error, None);
+        assert_eq!(prog.formatted_progress(), "Contacting registry...");
+
+        prog.current_bytes = 104857600; // 100 MB
+        prog.total_bytes = 524288000;   // 500 MB
+        prog.progress_fraction = 0.2;
+        assert_eq!(prog.current_bytes, 104857600);
+        assert_eq!(prog.total_bytes, 524288000);
+        assert_eq!(prog.formatted_progress(), "100.0 MB / 500.0 MB (20%)");
+
+        prog.is_complete = true;
+        prog.status_text = "Download complete".to_string();
+        prog.progress_fraction = 1.0;
+        prog.current_bytes = 524288000;
+        assert_eq!(prog.formatted_progress(), "500.0 MB / 500.0 MB (100%)");
+
+        let serialized = serde_json::to_string(&prog).expect("serialize");
+        let deserialized: ImageDownloadProgress =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(deserialized.image_tag, prog.image_tag);
+        assert_eq!(deserialized.progress_fraction, prog.progress_fraction);
+        assert!(deserialized.is_complete);
     }
 
     #[test]

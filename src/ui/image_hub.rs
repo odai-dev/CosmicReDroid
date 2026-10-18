@@ -2,10 +2,11 @@
 // Image Factory view for CosmicReDroid with Dockerfile synthesis and build execution.
 
 use crate::app::Message;
-use crate::models::AndroidVersion;
+use crate::models::{AndroidVersion, ImageDownloadProgress};
 use cosmic::iced::Alignment;
 use cosmic::widget;
 use cosmic::Element;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct ImageFactoryState {
@@ -57,7 +58,11 @@ impl ImageFactoryState {
     }
 }
 
-pub fn view<'a>(state: &'a ImageFactoryState) -> Element<'a, Message> {
+pub fn view<'a>(
+    state: &'a ImageFactoryState,
+    available_images: &'a HashSet<String>,
+    active_downloads: &'a HashMap<String, ImageDownloadProgress>,
+) -> Element<'a, Message> {
     let mut content = widget::Column::new()
         .spacing(16)
         .padding(16)
@@ -66,13 +71,124 @@ pub fn view<'a>(state: &'a ImageFactoryState) -> Element<'a, Message> {
     // Header
     let header = widget::Column::new()
         .spacing(4)
-        .push(widget::text::title2("ReDroid Image Factory"))
+        .push(widget::text::title2("Image Management & Factory"))
         .push(widget::text::body(
-            "Synthesize customized ReDroid images with ARM translation, Google Play Services, and root access.",
+            "Download official ReDroid base images or synthesize customized builds with ARM translation and Google Play.",
         ));
     content = content.push(header);
 
-    // Options Card
+    // Section 1: Official ReDroid Base Images
+    let mut images_list = widget::Column::new().spacing(12);
+
+    for version in AndroidVersion::ALL {
+        let tag = version.image_tag();
+        let is_downloaded = available_images.contains(tag);
+        let download = active_downloads.get(tag);
+
+        let mut row_content = widget::Column::new().spacing(8);
+
+        let status_badge = if is_downloaded {
+            widget::container(
+                widget::Row::new()
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .push(widget::icon::from_name("object-select-symbolic").size(14))
+                    .push(widget::text::caption("Cached Locally")),
+            )
+            .padding([2, 8])
+            .class(cosmic::theme::Container::Card)
+        } else if download.is_some() {
+            widget::container(
+                widget::Row::new()
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .push(widget::icon::from_name("folder-download-symbolic").size(14))
+                    .push(widget::text::caption("Downloading...")),
+            )
+            .padding([2, 8])
+            .class(cosmic::theme::Container::Card)
+        } else {
+            widget::container(
+                widget::Row::new()
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .push(widget::icon::from_name("software-update-available-symbolic").size(14))
+                    .push(widget::text::caption("Not Downloaded")),
+            )
+            .padding([2, 8])
+            .class(cosmic::theme::Container::Card)
+        };
+
+        let action_btn = if is_downloaded {
+            widget::button::standard("Re-download")
+                .leading_icon(widget::icon::from_name("view-refresh-symbolic"))
+                .on_press(Message::StartImageDownload(tag.to_string()))
+        } else if download.is_some() {
+            widget::button::destructive("Cancel")
+                .leading_icon(widget::icon::from_name("process-stop-symbolic"))
+                .on_press(Message::CancelImageDownload(tag.to_string()))
+        } else {
+            widget::button::suggested("Download Image")
+                .leading_icon(widget::icon::from_name("folder-download-symbolic"))
+                .on_press(Message::StartImageDownload(tag.to_string()))
+        };
+
+        let main_line = widget::Row::new()
+            .spacing(12)
+            .align_y(Alignment::Center)
+            .push(widget::text::title4(version.display_label()))
+            .push(widget::text::caption(tag))
+            .push(status_badge)
+            .push(action_btn);
+
+        row_content = row_content.push(main_line);
+
+        if let Some(prog) = download {
+            let prog_row = widget::Column::new()
+                .spacing(4)
+                .push(
+                    widget::Row::new()
+                        .spacing(8)
+                        .push(widget::icon::from_name("folder-download-symbolic").size(14))
+                        .push(widget::text::caption(prog.formatted_progress())),
+                )
+                .push(widget::progress_bar::determinate_linear(prog.progress_fraction));
+            row_content = row_content.push(prog_row);
+
+            if let Some(ref err) = prog.error {
+                let err_box = widget::container(
+                    widget::Row::new()
+                        .spacing(8)
+                        .push(widget::icon::from_name("dialog-error-symbolic").size(14))
+                        .push(widget::text::caption(err)),
+                )
+                .padding([4, 8])
+                .class(cosmic::theme::Container::Card);
+                row_content = row_content.push(err_box);
+            }
+        }
+
+        let item_card = widget::container(row_content)
+            .padding(12)
+            .class(cosmic::theme::Container::Card)
+            .width(cosmic::iced::Length::Fill);
+
+        images_list = images_list.push(item_card);
+    }
+
+    let official_section = widget::container(
+        widget::Column::new()
+            .spacing(12)
+            .push(widget::text::title3("Official ReDroid Base Images"))
+            .push(images_list),
+    )
+    .padding(16)
+    .class(cosmic::theme::Container::Card)
+    .width(cosmic::iced::Length::Fill);
+
+    content = content.push(official_section);
+
+    // Section 2: Image Factory Custom Synthesis Options
     let ver_idx = match state.selected_version {
         AndroidVersion::Android11 => 0,
         AndroidVersion::Android13 => 1,
@@ -82,7 +198,7 @@ pub fn view<'a>(state: &'a ImageFactoryState) -> Element<'a, Message> {
     let options_card = widget::container(
         widget::Column::new()
             .spacing(12)
-            .push(widget::text::title4("Image Options"))
+            .push(widget::text::title3("Custom Image Synthesis"))
             .push(widget::text::caption("Target Base Version"))
             .push(widget::dropdown(
                 AndroidVersion::NAMES,
@@ -111,7 +227,7 @@ pub fn view<'a>(state: &'a ImageFactoryState) -> Element<'a, Message> {
 
     content = content.push(options_card);
 
-    // Dockerfile Preview Card
+    // Section 3: Dockerfile Preview Card
     let dockerfile_text = state.generate_dockerfile();
     let preview_card = widget::container(
         widget::Column::new()
@@ -130,7 +246,7 @@ pub fn view<'a>(state: &'a ImageFactoryState) -> Element<'a, Message> {
 
     content = content.push(preview_card);
 
-    // Action and Build Streamer Card
+    // Section 4: Action and Build Streamer Card
     let mut build_card_col = widget::Column::new().spacing(12);
 
     let action_row = if state.is_building {

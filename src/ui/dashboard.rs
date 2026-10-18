@@ -2,7 +2,7 @@
 // Instance cards dashboard for CosmicReDroid.
 
 use crate::app::Message;
-use crate::models::{AndroidInstance, ContainerMetrics};
+use crate::models::{AndroidInstance, ContainerMetrics, ImageDownloadProgress, InstanceStatus};
 use cosmic::iced::Alignment;
 use cosmic::widget;
 use cosmic::Element;
@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub fn view<'a>(
     instances: &'a [AndroidInstance],
     metrics: &'a HashMap<Uuid, ContainerMetrics>,
+    active_downloads: &'a HashMap<String, ImageDownloadProgress>,
 ) -> Element<'a, Message> {
     if instances.is_empty() {
         return view_empty_state();
@@ -35,7 +36,11 @@ pub fn view<'a>(
     content = content.push(header_row);
 
     for instance in instances {
-        let card = view_instance_card(instance, metrics.get(&instance.id));
+        let card = view_instance_card(
+            instance,
+            metrics.get(&instance.id),
+            active_downloads.get(&instance.image_tag),
+        );
         content = content.push(card);
     }
 
@@ -71,6 +76,7 @@ fn view_empty_state<'a>() -> Element<'a, Message> {
 fn view_instance_card<'a>(
     instance: &'a AndroidInstance,
     metrics: Option<&'a ContainerMetrics>,
+    download: Option<&'a ImageDownloadProgress>,
 ) -> Element<'a, Message> {
     let mut card_content = widget::Column::new().spacing(12).width(cosmic::iced::Length::Fill);
 
@@ -128,7 +134,61 @@ fn view_instance_card<'a>(
 
     card_content = card_content.push(summary_row);
 
-    // Row 3: Live Telemetry (if running)
+    // Row 3: Active Image Download Progress Bar
+    if let Some(prog) = download {
+        let prog_header = widget::Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(widget::icon::from_name("folder-download-symbolic").size(14))
+            .push(widget::text::body(format!(
+                "Downloading Base Image ({}) - {}",
+                instance.image_tag,
+                prog.formatted_progress()
+            )));
+
+        let download_box = widget::container(
+            widget::Column::new()
+                .spacing(6)
+                .push(prog_header)
+                .push(widget::progress_bar::determinate_linear(prog.progress_fraction)),
+        )
+        .padding(10)
+        .class(cosmic::theme::Container::Card)
+        .width(cosmic::iced::Length::Fill);
+
+        card_content = card_content.push(download_box);
+    } else if let InstanceStatus::DownloadingImage(ref desc) = instance.status {
+        let download_box = widget::container(
+            widget::Row::new()
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .push(widget::icon::from_name("folder-download-symbolic").size(14))
+                .push(widget::text::body(desc)),
+        )
+        .padding(10)
+        .class(cosmic::theme::Container::Card)
+        .width(cosmic::iced::Length::Fill);
+
+        card_content = card_content.push(download_box);
+    }
+
+    // Row 4: Error Banner (if in error state)
+    if let InstanceStatus::Error(ref err) = instance.status {
+        let err_box = widget::container(
+            widget::Row::new()
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .push(widget::icon::from_name("dialog-error-symbolic").size(16))
+                .push(widget::text::caption(format!("Error: {err}"))),
+        )
+        .padding([8, 12])
+        .class(cosmic::theme::Container::Card)
+        .width(cosmic::iced::Length::Fill);
+
+        card_content = card_content.push(err_box);
+    }
+
+    // Row 5: Live Telemetry (if running)
     if instance.status.is_running() {
         if let Some(m) = metrics {
             let cpu_frac = (m.cpu_percent / 100.0).clamp(0.0, 1.0);
@@ -161,14 +221,31 @@ fn view_instance_card<'a>(
         }
     }
 
-    // Row 4: Action Toolbar
+    // Row 6: Action Toolbar
     let mut actions_row = widget::Row::new().spacing(8).align_y(Alignment::Center);
 
-    if instance.status.can_stop() {
+    if matches!(instance.status, InstanceStatus::DownloadingImage(_)) || download.is_some() {
+        actions_row = actions_row
+            .push(
+                widget::button::standard("Downloading...")
+                    .leading_icon(widget::icon::from_name("folder-download-symbolic")),
+            )
+            .push(
+                widget::button::destructive("Cancel")
+                    .leading_icon(widget::icon::from_name("process-stop-symbolic"))
+                    .on_press(Message::CancelImageDownload(instance.image_tag.clone())),
+            );
+    } else if instance.status.can_stop() {
         actions_row = actions_row.push(
             widget::button::destructive("Stop")
                 .leading_icon(widget::icon::from_name("media-playback-stop-symbolic"))
                 .on_press(Message::StopInstance(instance.id)),
+        );
+    } else if let InstanceStatus::Error(_) = instance.status {
+        actions_row = actions_row.push(
+            widget::button::suggested("Retry Start")
+                .leading_icon(widget::icon::from_name("view-refresh-symbolic"))
+                .on_press(Message::StartInstance(instance.id)),
         );
     } else if instance.status.can_start() {
         actions_row = actions_row.push(

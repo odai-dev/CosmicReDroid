@@ -3,7 +3,7 @@
 
 use crate::models::{
     AndroidInstance, AndroidVersion, ContainerMetrics, DevicePreset, HostHealthReport,
-    InstanceStatus, NavPage, ProxyConfig, SnapshotInfo,
+    ImageDownloadProgress, InstanceStatus, NavPage, ProxyConfig, SnapshotInfo,
 };
 use crate::ui::drawer::DrawerState;
 use crate::ui::image_hub::ImageFactoryState;
@@ -11,7 +11,7 @@ use cosmic::app::{context_drawer::ContextDrawer, Core, Task};
 use cosmic::iced::Alignment;
 use cosmic::widget::{self, nav_bar};
 use cosmic::{Action, Application, ApplicationExt, Element};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 pub struct AppModel {
@@ -28,6 +28,8 @@ pub struct AppModel {
     pub image_factory: ImageFactoryState,
     pub is_refreshing_health: bool,
     pub is_remediating: bool,
+    pub active_downloads: HashMap<String, ImageDownloadProgress>,
+    pub available_images: HashSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +47,12 @@ pub enum Message {
     ConfigureInstance(Uuid),
     DeleteInstance(Uuid),
     InstanceOperationFinished(Result<(Uuid, String), (Uuid, String)>),
+
+    // Image Downloads & Caching
+    StartImageDownload(String),
+    ImageDownloadProgressUpdated(ImageDownloadProgress),
+    CancelImageDownload(String),
+    LocalImagesRefreshed(HashSet<String>),
 
     // Context Drawer Inputs
     CloseDrawer,
@@ -141,6 +149,8 @@ impl Application for AppModel {
             image_factory: ImageFactoryState::default(),
             is_refreshing_health: false,
             is_remediating: false,
+            active_downloads: HashMap::new(),
+            available_images: HashSet::new(),
         };
 
         app.set_header_title(app.active_page.title().to_string());
@@ -156,6 +166,16 @@ impl Application for AppModel {
             Task::perform(
                 async { crate::backend::host::probe_host_health().await },
                 |report| Action::App(Message::HostHealthLoaded(report)),
+            ),
+            Task::perform(
+                async {
+                    if let Ok(engine) = crate::backend::docker::DockerEngine::new() {
+                        engine.list_local_images().await.unwrap_or_default()
+                    } else {
+                        HashSet::new()
+                    }
+                },
+                |images| Action::App(Message::LocalImagesRefreshed(images)),
             ),
         ]);
 
@@ -226,9 +246,11 @@ impl Application for AppModel {
     fn view(&self) -> Element<'_, Self::Message> {
         match self.active_page {
             NavPage::Instances => {
-                crate::ui::dashboard::view(&self.config.instances, &self.metrics)
+                crate::ui::dashboard::view(&self.config.instances, &self.metrics, &self.active_downloads)
             }
-            NavPage::ImageFactory => crate::ui::image_hub::view(&self.image_factory),
+            NavPage::ImageFactory => {
+                crate::ui::image_hub::view(&self.image_factory, &self.available_images, &self.active_downloads)
+            }
             NavPage::Snapshots => crate::ui::host_health::view_snapshots(&self.snapshots),
             NavPage::HostHealth => crate::ui::host_health::view_host_health(
                 &self.host_health,
@@ -306,59 +328,167 @@ impl Application for AppModel {
                 Task::none()
             }
 
-            Message::StartInstance(id) => {
-                if let Some(inst) = self.config.instances.iter_mut().find(|i| i.id == id) {
-                    inst.status = InstanceStatus::Starting;
-                    let target = inst.clone();
+            Message::LocalImagesRefreshed(images) => {
+                self.available_images = images;
+                Task::none()
+            }
 
-                    return Task::perform(
-                        async move {
-                            if let Err(err) =
-                                crate::backend::spoofing::write_local_prop_async(
-                                    &target.data_path,
-                                    &target.identity,
-                                )
-                                .await
-                            {
-                                return Err((target.id, format!("Failed to write local.prop: {err:#}")));
+            Message::StartImageDownload(image_tag) => {
+                let initial_prog = ImageDownloadProgress::new(&image_tag);
+                self.active_downloads.insert(image_tag.clone(), initial_prog);
+                for inst in self.config.instances.iter_mut() {
+                    if inst.image_tag == image_tag && (inst.status.can_start() || matches!(inst.status, InstanceStatus::Stopped)) {
+                        inst.status = InstanceStatus::DownloadingImage("Preparing download...".to_string());
+                    }
+                }
+                let _ = crate::config::save_config(&self.config);
+
+                if let Ok(engine) = crate::backend::docker::DockerEngine::new() {
+                    let stream = engine.pull_image_stream(image_tag);
+                    Task::run(stream, |prog| Action::App(Message::ImageDownloadProgressUpdated(prog)))
+                } else {
+                    Task::none()
+                }
+            }
+
+            Message::ImageDownloadProgressUpdated(prog) => {
+                if prog.is_complete {
+                    self.active_downloads.remove(&prog.image_tag);
+                    self.available_images.insert(prog.image_tag.clone());
+
+                    let mut restart_tasks = Vec::new();
+                    for inst in self.config.instances.iter_mut() {
+                        if inst.image_tag == prog.image_tag {
+                            if matches!(inst.status, InstanceStatus::DownloadingImage(_)) {
+                                inst.status = InstanceStatus::Stopped;
+                                restart_tasks.push(Task::done(Action::App(Message::StartInstance(inst.id))));
                             }
-
-                            let engine = match crate::backend::docker::DockerEngine::new() {
-                                Ok(e) => e,
-                                Err(err) => return Err((target.id, format!("Docker connection error: {err:#}"))),
-                            };
-
-                            if let Err(err) = engine.create_instance_container(&target).await {
-                                return Err((target.id, format!("Failed to create container: {err:#}")));
+                        }
+                    }
+                    let _ = crate::config::save_config(&self.config);
+                    if !restart_tasks.is_empty() {
+                        return Task::batch(restart_tasks);
+                    }
+                } else if let Some(ref err) = prog.error {
+                    self.active_downloads.remove(&prog.image_tag);
+                    for inst in self.config.instances.iter_mut() {
+                        if inst.image_tag == prog.image_tag {
+                            if matches!(inst.status, InstanceStatus::DownloadingImage(_)) {
+                                inst.status = InstanceStatus::Error(format!("Download failed: {err}"));
                             }
-
-                            if let Err(err) = engine.start_container(&target.container_name).await {
-                                return Err((target.id, format!("Failed to start container: {err:#}")));
+                        }
+                    }
+                    let _ = crate::config::save_config(&self.config);
+                } else {
+                    let label = format!("Downloading: {}", prog.formatted_progress());
+                    for inst in self.config.instances.iter_mut() {
+                        if inst.image_tag == prog.image_tag {
+                            if matches!(inst.status, InstanceStatus::DownloadingImage(_)) {
+                                inst.status = InstanceStatus::DownloadingImage(label.clone());
                             }
-
-                            let _ = crate::backend::adb_scrcpy::adb_connect(target.adb_port).await;
-
-                            if let Err(err) =
-                                crate::backend::adb_scrcpy::wait_for_boot(target.adb_port, 45).await
-                            {
-                                return Err((target.id, format!("Boot timeout: {err:#}")));
-                            }
-
-                            let _ = crate::backend::adb_scrcpy::inject_identity_and_proxy(
-                                target.adb_port,
-                                &target.identity,
-                                &target.proxy,
-                            )
-                            .await;
-
-                            let _ = crate::backend::adb_scrcpy::spawn_scrcpy_for_instance(&target);
-
-                            Ok((target.id, "Started successfully".to_string()))
-                        },
-                        |res| Action::App(Message::InstanceOperationFinished(res)),
-                    );
+                        }
+                    }
+                    self.active_downloads.insert(prog.image_tag.clone(), prog);
                 }
                 Task::none()
+            }
+
+            Message::CancelImageDownload(image_tag) => {
+                self.active_downloads.remove(&image_tag);
+                for inst in self.config.instances.iter_mut() {
+                    if inst.image_tag == image_tag && matches!(inst.status, InstanceStatus::DownloadingImage(_)) {
+                        inst.status = InstanceStatus::Stopped;
+                    }
+                }
+                let _ = crate::config::save_config(&self.config);
+                Task::none()
+            }
+
+            Message::StartInstance(id) => {
+                let inst_opt = self.config.instances.iter().find(|i| i.id == id).cloned();
+                let Some(target) = inst_opt else {
+                    return Task::none();
+                };
+
+                // Check if base container image is available locally
+                let is_cached = self.available_images.contains(&target.image_tag);
+                if !is_cached {
+                    let tag = target.image_tag.clone();
+                    let engine_res = crate::backend::docker::DockerEngine::new();
+
+                    if let Some(inst) = self.config.instances.iter_mut().find(|i| i.id == id) {
+                        match &engine_res {
+                            Ok(_) => {
+                                inst.status = InstanceStatus::DownloadingImage("Starting download...".to_string());
+                            }
+                            Err(_) => {
+                                inst.status = InstanceStatus::Error("Failed to connect to Docker engine".to_string());
+                            }
+                        }
+                    }
+                    let _ = crate::config::save_config(&self.config);
+
+                    if let Ok(engine) = engine_res {
+                        let initial_prog = ImageDownloadProgress::new(&tag);
+                        self.active_downloads.insert(tag.clone(), initial_prog);
+                        let stream = engine.pull_image_stream(tag);
+                        return Task::run(stream, |prog| Action::App(Message::ImageDownloadProgressUpdated(prog)));
+                    } else {
+                        return Task::none();
+                    }
+                }
+
+                if let Some(inst) = self.config.instances.iter_mut().find(|i| i.id == id) {
+                    inst.status = InstanceStatus::Starting;
+                }
+                let _ = crate::config::save_config(&self.config);
+
+                return Task::perform(
+                    async move {
+                        if let Err(err) =
+                            crate::backend::spoofing::write_local_prop_async(
+                                &target.data_path,
+                                &target.identity,
+                            )
+                            .await
+                        {
+                            return Err((target.id, format!("Failed to write local.prop: {err:#}")));
+                        }
+
+                        let engine = match crate::backend::docker::DockerEngine::new() {
+                            Ok(e) => e,
+                            Err(err) => return Err((target.id, format!("Docker connection error: {err:#}"))),
+                        };
+
+                        if let Err(err) = engine.create_instance_container(&target).await {
+                            return Err((target.id, format!("Failed to create container: {err:#}")));
+                        }
+
+                        if let Err(err) = engine.start_container(&target.container_name).await {
+                            return Err((target.id, format!("Failed to start container: {err:#}")));
+                        }
+
+                        let _ = crate::backend::adb_scrcpy::adb_connect(target.adb_port).await;
+
+                        if let Err(err) =
+                            crate::backend::adb_scrcpy::wait_for_boot(target.adb_port, 45).await
+                        {
+                            return Err((target.id, format!("Boot timeout: {err:#}")));
+                        }
+
+                        let _ = crate::backend::adb_scrcpy::inject_identity_and_proxy(
+                            target.adb_port,
+                            &target.identity,
+                            &target.proxy,
+                        )
+                        .await;
+
+                        let _ = crate::backend::adb_scrcpy::spawn_scrcpy_for_instance(&target);
+
+                        Ok((target.id, "Started successfully".to_string()))
+                    },
+                    |res| Action::App(Message::InstanceOperationFinished(res)),
+                );
             }
 
             Message::StopInstance(id) => {

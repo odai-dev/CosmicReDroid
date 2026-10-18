@@ -19,8 +19,8 @@ pub use docker::{
     build_container_host_config, build_container_host_config_with_root,
     calculate_metrics_from_stats, create_container, create_device_mapping,
     create_instance_container, delete_container, get_container_metrics, get_container_stats,
-    inspect_container, pull_image, resolve_binder_mappings, resolve_binder_mappings_with_root,
-    start_container, stop_container, DockerEngine,
+    inspect_container, list_local_images, pull_image, pull_image_stream, resolve_binder_mappings,
+    resolve_binder_mappings_with_root, start_container, stop_container, DockerEngine,
 };
 pub use host::{
     generate_remediation_script, probe_adb, probe_binder, probe_docker, probe_gpu_dri,
