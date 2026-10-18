@@ -1,6 +1,7 @@
 mod app;
 pub mod config;
 pub mod i18n;
+pub mod models;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();

@@ -69,8 +69,8 @@ CosmicReDroid is a native Linux Android Multi-Instance Control Center built on S
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Scaffolding & Packaging | `cosmic-app-template` layout, Cargo.toml, justfile, i18n, desktop, icons, initial entry point | None | PLANNED |
-| M2 | Domain Models & Config | `src/models.rs`, `src/config.rs`, tests, default seeding | M1 | PLANNED |
+| M1 | Scaffolding & Packaging | `cosmic-app-template` layout, Cargo.toml, justfile, i18n, desktop, icons, initial entry point | None | DONE (commits 3edcc13, f678a16) |
+| M2 | Domain Models & Config | `src/models.rs`, `src/config.rs`, tests, default seeding | M1 | DONE |
 | M3 | Backend Subsystems | `src/backend/` (spoofing, docker, adb_scrcpy, storage, host), backend tests | M2 | PLANNED |
 | M4 | UI Architecture & Views | `src/ui/` (dashboard, drawer, image_hub, host_health), `src/app.rs`, zero emojis | M2, M3 | PLANNED |
 | M5 | E2E Testing & Acceptance | Verification of cargo check, cargo test, zero stubs, zero emojis, clean git log | M1, M2, M3, M4 | PLANNED |
