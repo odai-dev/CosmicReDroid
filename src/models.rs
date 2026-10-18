@@ -58,6 +58,12 @@ impl AndroidVersion {
         AndroidVersion::Android14,
     ];
 
+    pub const NAMES: &'static [&'static str] = &[
+        "Android 11 (API 30 - RedBull)",
+        "Android 13 (API 33 - Tiramisu)",
+        "Android 14 (API 34 - Upside Down Cake)",
+    ];
+
     pub fn display_label(&self) -> &'static str {
         match self {
             AndroidVersion::Android11 => "Android 11 (API 30 - RedBull)",
@@ -111,6 +117,13 @@ impl DevicePreset {
         DevicePreset::Pixel8Pro,
         DevicePreset::AsusRogPhone8,
         DevicePreset::Custom,
+    ];
+
+    pub const NAMES: &'static [&'static str] = &[
+        "Samsung Galaxy S24 Ultra",
+        "Google Pixel 8 Pro",
+        "ASUS ROG Phone 8",
+        "Custom Device Profile",
     ];
 
     pub fn display_name(&self) -> &'static str {

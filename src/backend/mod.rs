@@ -35,5 +35,6 @@ pub use spoofing::{
 pub use storage::{
     allocate_next_port_and_binder, clone_instance, clone_instance_data, create_snapshot,
     delete_snapshot, delete_snapshot_by_id, find_next_adb_port, find_next_binder_index,
-    list_snapshots, regenerate_instance_identity, restore_snapshot, ADB_PORT_BASE, ADB_PORT_STEP,
+    list_all_snapshots, list_snapshots, regenerate_instance_identity, restore_snapshot,
+    ADB_PORT_BASE, ADB_PORT_STEP,
 };

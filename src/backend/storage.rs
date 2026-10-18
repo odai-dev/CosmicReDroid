@@ -424,6 +424,34 @@ pub fn list_snapshots(instance_id: &Uuid) -> Result<Vec<SnapshotInfo>> {
     Ok(snapshots)
 }
 
+/// Lists all available snapshots across all instances.
+pub fn list_all_snapshots() -> Result<Vec<SnapshotInfo>> {
+    let base_dir = crate::config::snapshots_dir()?;
+    if !base_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut snapshots = Vec::new();
+    let entries = std::fs::read_dir(&base_dir).with_context(|| {
+        format!("Failed to read base snapshots directory: {}", base_dir.display())
+    })?;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            if let Ok(id) = Uuid::parse_str(&entry.file_name().to_string_lossy()) {
+                if let Ok(instance_snaps) = list_snapshots(&id) {
+                    snapshots.extend(instance_snaps);
+                }
+            }
+        }
+    }
+
+    snapshots.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(snapshots)
+}
+
 /// Deletes a snapshot archive and its associated metadata JSON file.
 pub fn delete_snapshot(snapshot: &SnapshotInfo) -> Result<()> {
     if snapshot.archive_path.exists() {

@@ -10,7 +10,7 @@ Native Linux Android Multi-Instance Control Center built on System76 libcosmic a
 - Copy-on-Write (CoW) instance cloning and zstd snapshot engine
 - Integrated Image Factory for custom Android image builds
 - Host diagnostics with pkexec remediation
-- Native COSMIC UI with zero emojis and FreeDesktop symbolic icons
+- Native COSMIC UI
 
 ## Building
 
