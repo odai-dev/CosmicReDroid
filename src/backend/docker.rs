@@ -349,6 +349,30 @@ pub async fn create_container(docker: &Docker, instance: &AndroidInstance) -> Re
         "Creating container '{}' from image '{}'",
         instance.container_name, instance.image_tag
     );
+
+    if docker.inspect_image(&instance.image_tag).await.is_err() {
+        info!(
+            "Image '{}' not found locally, pulling...",
+            instance.image_tag
+        );
+        pull_image(docker, &instance.image_tag).await?;
+    }
+
+    if let Ok(inspect) = docker.inspect_container(&instance.container_name, None::<InspectContainerOptions>).await {
+        let is_running = inspect.state.and_then(|s| s.running).unwrap_or(false);
+        if is_running {
+            if let Some(id) = inspect.id {
+                return Ok(id);
+            }
+        } else {
+            info!(
+                "Removing existing stopped container '{}' to apply current configuration",
+                instance.container_name
+            );
+            let _ = delete_container(docker, &instance.container_name, true).await;
+        }
+    }
+
     let options = Some(CreateContainerOptions {
         name: instance.container_name.clone(),
         platform: None,

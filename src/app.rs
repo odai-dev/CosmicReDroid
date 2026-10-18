@@ -44,7 +44,7 @@ pub enum Message {
     SnapshotInstance(Uuid),
     ConfigureInstance(Uuid),
     DeleteInstance(Uuid),
-    InstanceOperationFinished(Result<(Uuid, String), String>),
+    InstanceOperationFinished(Result<(Uuid, String), (Uuid, String)>),
 
     // Context Drawer Inputs
     CloseDrawer,
@@ -320,18 +320,20 @@ impl Application for AppModel {
                                 )
                                 .await
                             {
-                                return Err(format!("Failed to write local.prop: {err}"));
+                                return Err((target.id, format!("Failed to write local.prop: {err:#}")));
                             }
 
-                            let engine = crate::backend::docker::DockerEngine::new()
-                                .map_err(|e| e.to_string())?;
+                            let engine = match crate::backend::docker::DockerEngine::new() {
+                                Ok(e) => e,
+                                Err(err) => return Err((target.id, format!("Docker connection error: {err:#}"))),
+                            };
 
                             if let Err(err) = engine.create_instance_container(&target).await {
-                                return Err(format!("Failed to create container: {err}"));
+                                return Err((target.id, format!("Failed to create container: {err:#}")));
                             }
 
                             if let Err(err) = engine.start_container(&target.container_name).await {
-                                return Err(format!("Failed to start container: {err}"));
+                                return Err((target.id, format!("Failed to start container: {err:#}")));
                             }
 
                             let _ = crate::backend::adb_scrcpy::adb_connect(target.adb_port).await;
@@ -339,7 +341,7 @@ impl Application for AppModel {
                             if let Err(err) =
                                 crate::backend::adb_scrcpy::wait_for_boot(target.adb_port, 45).await
                             {
-                                return Err(format!("Boot timeout: {err}"));
+                                return Err((target.id, format!("Boot timeout: {err:#}")));
                             }
 
                             let _ = crate::backend::adb_scrcpy::inject_identity_and_proxy(
@@ -399,15 +401,10 @@ impl Application for AppModel {
                             let cloned =
                                 crate::backend::storage::clone_instance(&source, &all_instances, None)
                                     .await
-                                    .map_err(|e| e.to_string())?;
+                                    .map_err(|e| (source.id, e.to_string()))?;
                             Ok((cloned.id, "Cloned".to_string()))
                         },
-                        |res: Result<(Uuid, String), String>| match res {
-                            Ok((cloned_id, _)) => {
-                                Action::App(Message::InstanceOperationFinished(Ok((cloned_id, "Cloned".into()))))
-                            }
-                            Err(e) => Action::App(Message::InstanceOperationFinished(Err(e))),
-                        },
+                        |res| Action::App(Message::InstanceOperationFinished(res)),
                     );
                 }
                 Task::none()
@@ -431,7 +428,10 @@ impl Application for AppModel {
                         },
                         |res: Result<Vec<SnapshotInfo>, String>| match res {
                             Ok(snaps) => Action::App(Message::SnapshotsLoaded(snaps)),
-                            Err(e) => Action::App(Message::InstanceOperationFinished(Err(e))),
+                            Err(e) => {
+                                tracing::error!("Snapshot error: {e}");
+                                Action::App(Message::PeriodicTick)
+                            }
                         },
                     );
                 }
@@ -476,8 +476,11 @@ impl Application for AppModel {
                             }
                         }
                     }
-                    Err(err) => {
-                        tracing::error!("Instance operation error: {err}");
+                    Err((id, err)) => {
+                        tracing::error!("Instance operation error for instance {id}: {err}");
+                        if let Some(inst) = self.config.instances.iter_mut().find(|i| i.id == id) {
+                            inst.status = InstanceStatus::Error(err);
+                        }
                     }
                 }
                 let _ = crate::config::save_config(&self.config);
@@ -762,7 +765,7 @@ impl Application for AppModel {
                             async move {
                                 crate::backend::storage::restore_snapshot(&snap, &target.data_path)
                                     .await
-                                    .map_err(|e| e.to_string())?;
+                                    .map_err(|e| (target.id, e.to_string()))?;
                                 Ok((target.id, "Restored snapshot".to_string()))
                             },
                             |res| Action::App(Message::InstanceOperationFinished(res)),
