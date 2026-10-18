@@ -296,8 +296,8 @@ mount -t binder binder /dev/binderfs -o stats=global 2>/dev/null || true
 [ -e /dev/binderfs/vndbinder ] && ln -sf /dev/binderfs/vndbinder /dev/vndbinder
 
 # 4. Ensure permissive access for unprivileged containers
+chmod 755 /dev/binderfs 2>/dev/null || true
 chmod 666 /dev/binder /dev/hwbinder /dev/vndbinder /dev/binderfs/* 2>/dev/null || true
-chmod 666 /dev/binder* 2>/dev/null || true
 chmod 666 /dev/dri/renderD* 2>/dev/null || true
 
 # 5. Ensure user groups for docker and render
