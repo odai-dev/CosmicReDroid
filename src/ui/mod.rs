@@ -1,5 +1,4 @@
-// src/ui/mod.rs
-// UI view modules for CosmicReDroid.
+//! UI view modules for CosmicReDroid.
 
 pub mod dashboard;
 pub mod drawer;

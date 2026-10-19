@@ -1,6 +1,4 @@
-// src/backend/host.rs
-// Host environment capability probes (Docker, binderfs, DRI GPU, ADB, scrcpy, reflink)
-// and asynchronous pkexec permission remediation helper.
+//! Host environment capability probes and remediation helpers.
 
 #![allow(dead_code)]
 
@@ -274,7 +272,7 @@ pub async fn probe_host_health() -> HostHealthReport {
     }
 }
 
-/// Alias for `probe_host_health()` matching survey_backend.md exports.
+/// Probes the host system and returns a comprehensive health report.
 pub async fn run_host_diagnostics() -> HostHealthReport {
     probe_host_health().await
 }

@@ -8,6 +8,14 @@ license = "GPL-3.0-only"
 repository = "https://github.com/pop-os/cosmic-redroid"
 readme = "README.md"
 
+[lib]
+name = "cosmic_redroid"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cosmic-redroid"
+path = "src/main.rs"
+
 [dependencies]
 # Docker Engine Client
 bollard = "0.18"

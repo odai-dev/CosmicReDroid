@@ -1,5 +1,4 @@
-// src/ui/dashboard.rs
-// Instance cards dashboard for CosmicReDroid.
+//! Instance cards dashboard for CosmicReDroid.
 
 use crate::app::Message;
 use crate::models::{AndroidInstance, ContainerMetrics, ImageDownloadProgress, InstanceStatus};
@@ -13,6 +12,9 @@ pub fn view<'a>(
     instances: &'a [AndroidInstance],
     metrics: &'a HashMap<Uuid, ContainerMetrics>,
     active_downloads: &'a HashMap<String, ImageDownloadProgress>,
+    confirm_delete_id: Option<Uuid>,
+    mask_identifiers: bool,
+    notification: Option<&'a (String, bool)>,
 ) -> Element<'a, Message> {
     if instances.is_empty() {
         return view_empty_state();
@@ -23,6 +25,43 @@ pub fn view<'a>(
         .padding(16)
         .width(cosmic::iced::Length::Fill);
 
+    if let Some((msg, is_error)) = notification {
+        let icon_name = if *is_error {
+            "dialog-error-symbolic"
+        } else {
+            "emblem-ok-symbolic"
+        };
+
+        let notif_card = widget::container(
+            widget::Row::new()
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .push(widget::icon::from_name(icon_name).size(20))
+                .push(widget::text::body(msg).width(cosmic::iced::Length::Fill))
+                .push(
+                    widget::button::standard("Dismiss")
+                        .on_press(Message::DismissNotification),
+                ),
+        )
+        .padding(12)
+        .class(cosmic::theme::Container::Card)
+        .width(cosmic::iced::Length::Fill);
+
+        content = content.push(notif_card);
+    }
+
+    let mask_label = if mask_identifiers {
+        "Reveal Identifiers"
+    } else {
+        "Mask Identifiers"
+    };
+
+    let mask_icon = if mask_identifiers {
+        "view-conceal-symbolic"
+    } else {
+        "view-reveal-symbolic"
+    };
+
     let header_row = widget::Row::new()
         .spacing(12)
         .align_y(Alignment::Center)
@@ -31,6 +70,12 @@ pub fn view<'a>(
             widget::container(widget::text::caption(format!("{} Total", instances.len())))
                 .padding([2, 8])
                 .class(cosmic::theme::Container::Card),
+        )
+        .push(widget::Space::new().width(cosmic::iced::Length::Fill))
+        .push(
+            widget::button::standard(mask_label)
+                .leading_icon(widget::icon::from_name(mask_icon))
+                .on_press(Message::ToggleMaskIdentifiers),
         );
 
     content = content.push(header_row);
@@ -40,6 +85,8 @@ pub fn view<'a>(
             instance,
             metrics.get(&instance.id),
             active_downloads.get(&instance.image_tag),
+            confirm_delete_id == Some(instance.id),
+            mask_identifiers,
         );
         content = content.push(card);
     }
@@ -77,10 +124,11 @@ fn view_instance_card<'a>(
     instance: &'a AndroidInstance,
     metrics: Option<&'a ContainerMetrics>,
     download: Option<&'a ImageDownloadProgress>,
+    confirm_delete: bool,
+    mask_identifiers: bool,
 ) -> Element<'a, Message> {
     let mut card_content = widget::Column::new().spacing(12).width(cosmic::iced::Length::Fill);
 
-    // Row 1: Instance Header
     let status_badge = widget::container(
         widget::Row::new()
             .spacing(6)
@@ -117,24 +165,43 @@ fn view_instance_card<'a>(
 
     card_content = card_content.push(top_row);
 
-    // Row 2: Hardware Summary
     let (b1, b2, b3) = instance.binder_indices();
-    let summary_row = widget::Row::new()
+
+    let display_imei = if mask_identifiers {
+        let len = instance.identity.imei.len();
+        let last4 = &instance.identity.imei[len.saturating_sub(4)..];
+        format!("IMEI: •••••••••••{last4}")
+    } else {
+        format!("IMEI: {}", instance.identity.imei)
+    };
+
+    let display_android_id = if mask_identifiers {
+        let len = instance.identity.android_id.len();
+        let last4 = &instance.identity.android_id[len.saturating_sub(4)..];
+        format!("Android ID: ••••••••••••{last4}")
+    } else {
+        format!("Android ID: {}", instance.identity.android_id)
+    };
+
+    let hw_row = widget::Row::new()
         .spacing(16)
         .align_y(Alignment::Center)
         .push(widget::text::caption(format!("Model: {}", instance.identity.model)))
-        .push(widget::text::caption(format!("IMEI: {}", instance.identity.imei)))
-        .push(widget::text::caption(format!("Android ID: {}", instance.identity.android_id)))
         .push(widget::text::caption(format!(
             "Display: {}x{} @ {} FPS",
             instance.identity.width, instance.identity.height, instance.identity.fps
         )))
-        .push(widget::text::caption(format!("Binder: /dev/binder{},{},{}", b1, b2, b3)))
-        .push(widget::text::caption(format!("Proxy: {}", instance.proxy.summary_display())));
+        .push(widget::text::caption(format!("Binder: /dev/binder{},{},{}", b1, b2, b3)));
 
-    card_content = card_content.push(summary_row);
+    let id_row = widget::Row::new()
+        .spacing(16)
+        .align_y(Alignment::Center)
+        .push(widget::text::caption(format!("Proxy: {}", instance.proxy.summary_display())))
+        .push(widget::text::caption(display_imei))
+        .push(widget::text::caption(display_android_id));
 
-    // Row 3: Active Image Download Progress Bar
+    card_content = card_content.push(hw_row).push(id_row);
+
     if let Some(prog) = download {
         let prog_header = widget::Row::new()
             .spacing(8)
@@ -172,7 +239,6 @@ fn view_instance_card<'a>(
         card_content = card_content.push(download_box);
     }
 
-    // Row 4: Error Banner (if in error state)
     if let InstanceStatus::Error(ref err) = instance.status {
         let err_box = widget::container(
             widget::Row::new()
@@ -188,7 +254,6 @@ fn view_instance_card<'a>(
         card_content = card_content.push(err_box);
     }
 
-    // Row 5: Live Telemetry (if running)
     if instance.status.is_running() {
         if let Some(m) = metrics {
             let cpu_frac = (m.cpu_percent / 100.0).clamp(0.0, 1.0);
@@ -221,7 +286,6 @@ fn view_instance_card<'a>(
         }
     }
 
-    // Row 6: Action Toolbar
     let mut actions_row = widget::Row::new().spacing(8).align_y(Alignment::Center);
 
     if matches!(instance.status, InstanceStatus::DownloadingImage(_)) || download.is_some() {
@@ -255,7 +319,7 @@ fn view_instance_card<'a>(
         );
     } else {
         actions_row = actions_row.push(
-            widget::button::standard("Processing...")
+            widget::button::standard(instance.status.display_status())
                 .leading_icon(widget::icon::from_name("system-run-symbolic")),
         );
     }
@@ -273,27 +337,68 @@ fn view_instance_card<'a>(
         );
     }
 
-    actions_row = actions_row
-        .push(
+    if instance.status.can_clone() {
+        actions_row = actions_row.push(
             widget::button::standard("Clone")
                 .leading_icon(widget::icon::from_name("edit-copy-symbolic"))
                 .on_press(Message::CloneInstance(instance.id)),
-        )
-        .push(
+        );
+    } else {
+        actions_row = actions_row.push(
+            widget::button::standard("Clone")
+                .leading_icon(widget::icon::from_name("edit-copy-symbolic")),
+        );
+    }
+
+    if instance.status.can_snapshot() {
+        actions_row = actions_row.push(
             widget::button::standard("Snapshot")
                 .leading_icon(widget::icon::from_name("camera-photo-symbolic"))
                 .on_press(Message::SnapshotInstance(instance.id)),
-        )
-        .push(
+        );
+    } else {
+        actions_row = actions_row.push(
+            widget::button::standard("Snapshot")
+                .leading_icon(widget::icon::from_name("camera-photo-symbolic")),
+        );
+    }
+
+    if instance.status.can_configure() {
+        actions_row = actions_row.push(
             widget::button::standard("Configure")
                 .leading_icon(widget::icon::from_name("preferences-system-symbolic"))
                 .on_press(Message::ConfigureInstance(instance.id)),
-        )
-        .push(
+        );
+    } else {
+        actions_row = actions_row.push(
+            widget::button::standard("Configure")
+                .leading_icon(widget::icon::from_name("preferences-system-symbolic")),
+        );
+    }
+
+    if confirm_delete {
+        actions_row = actions_row
+            .push(
+                widget::button::destructive("Confirm Delete?")
+                    .leading_icon(widget::icon::from_name("user-trash-symbolic"))
+                    .on_press(Message::DeleteInstance(instance.id)),
+            )
+            .push(
+                widget::button::standard("Cancel")
+                    .on_press(Message::CancelDeleteInstance),
+            );
+    } else if instance.status.can_delete() {
+        actions_row = actions_row.push(
             widget::button::destructive("Delete")
                 .leading_icon(widget::icon::from_name("user-trash-symbolic"))
-                .on_press(Message::DeleteInstance(instance.id)),
+                .on_press(Message::ConfirmDeleteInstance(instance.id)),
         );
+    } else {
+        actions_row = actions_row.push(
+            widget::button::destructive("Delete")
+                .leading_icon(widget::icon::from_name("user-trash-symbolic")),
+        );
+    }
 
     card_content = card_content.push(actions_row);
 

@@ -1,5 +1,4 @@
-// src/ui/image_hub.rs
-// Image Factory view for CosmicReDroid with Dockerfile synthesis and build execution.
+//! Image Factory view for CosmicReDroid with Dockerfile synthesis and build execution.
 
 use crate::app::Message;
 use crate::models::{AndroidVersion, ImageDownloadProgress};
@@ -248,7 +247,6 @@ fn view_base_images_tab<'a>(
 ) -> Element<'a, Message> {
     let mut col = widget::Column::new().spacing(16);
 
-    // Section 1: Official Base Images
     let mut images_list = widget::Column::new().spacing(12);
 
     for version in AndroidVersion::ALL {
@@ -367,7 +365,6 @@ fn view_base_images_tab<'a>(
 
     col = col.push(official_section);
 
-    // Section 2: Custom Images in Local Library
     let mut custom_list = widget::Column::new().spacing(12);
 
     let custom_tags: Vec<&String> = available_images

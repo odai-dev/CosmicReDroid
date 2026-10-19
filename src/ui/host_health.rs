@@ -1,5 +1,4 @@
-// src/ui/host_health.rs
-// Host diagnostics and snapshots views for CosmicReDroid.
+//! Host diagnostics and snapshots views for CosmicReDroid.
 
 use crate::app::Message;
 use crate::models::{HostHealthReport, SnapshotInfo};
@@ -7,7 +6,11 @@ use cosmic::iced::Alignment;
 use cosmic::widget;
 use cosmic::Element;
 
-pub fn view_snapshots<'a>(snapshots: &'a [SnapshotInfo]) -> Element<'a, Message> {
+pub fn view_snapshots<'a>(
+    snapshots: &'a [SnapshotInfo],
+    confirm_restore_id: Option<uuid::Uuid>,
+    confirm_delete_id: Option<uuid::Uuid>,
+) -> Element<'a, Message> {
     let mut content = widget::Column::new()
         .spacing(16)
         .padding(16)
@@ -40,6 +43,46 @@ pub fn view_snapshots<'a>(snapshots: &'a [SnapshotInfo]) -> Element<'a, Message>
         content = content.push(empty_card);
     } else {
         for snap in snapshots {
+            let mut actions_row = widget::Row::new().spacing(8).align_y(Alignment::Center);
+
+            if confirm_restore_id == Some(snap.id) {
+                actions_row = actions_row
+                    .push(
+                        widget::button::destructive("Confirm Restore")
+                            .leading_icon(widget::icon::from_name("document-revert-symbolic"))
+                            .on_press(Message::RestoreSnapshot(snap.id)),
+                    )
+                    .push(
+                        widget::button::standard("Cancel")
+                            .on_press(Message::CancelRestoreSnapshot),
+                    );
+            } else {
+                actions_row = actions_row.push(
+                    widget::button::suggested("Restore")
+                        .leading_icon(widget::icon::from_name("document-revert-symbolic"))
+                        .on_press(Message::ConfirmRestoreSnapshot(snap.id)),
+                );
+            }
+
+            if confirm_delete_id == Some(snap.id) {
+                actions_row = actions_row
+                    .push(
+                        widget::button::destructive("Confirm Delete")
+                            .leading_icon(widget::icon::from_name("user-trash-symbolic"))
+                            .on_press(Message::DeleteSnapshot(snap.id)),
+                    )
+                    .push(
+                        widget::button::standard("Cancel")
+                            .on_press(Message::CancelDeleteSnapshot),
+                    );
+            } else {
+                actions_row = actions_row.push(
+                    widget::button::destructive("Delete")
+                        .leading_icon(widget::icon::from_name("user-trash-symbolic"))
+                        .on_press(Message::ConfirmDeleteSnapshot(snap.id)),
+                );
+            }
+
             let snap_card = widget::container(
                 widget::Row::new()
                     .spacing(16)
@@ -62,16 +105,7 @@ pub fn view_snapshots<'a>(snapshots: &'a [SnapshotInfo]) -> Element<'a, Message>
                             .push(widget::text::body(snap.size_display()))
                             .push(widget::text::caption(snap.date_display())),
                     )
-                    .push(
-                        widget::button::suggested("Restore")
-                            .leading_icon(widget::icon::from_name("document-revert-symbolic"))
-                            .on_press(Message::RestoreSnapshot(snap.id)),
-                    )
-                    .push(
-                        widget::button::destructive("Delete")
-                            .leading_icon(widget::icon::from_name("user-trash-symbolic"))
-                            .on_press(Message::DeleteSnapshot(snap.id)),
-                    ),
+                    .push(actions_row),
             )
             .padding(16)
             .class(cosmic::theme::Container::Card)
@@ -151,14 +185,14 @@ pub fn view_host_health<'a>(
             .width(cosmic::iced::Length::Fill);
 
         content = content.push(rem_card);
-    } else {
+    } else if report.all_ok() {
         let ok_card = widget::container(
             widget::Row::new()
                 .spacing(12)
                 .align_y(Alignment::Center)
                 .push(widget::icon::from_name("emblem-ok-symbolic").size(24))
                 .push(widget::text::body(
-                    "All host prerequisites and kernel modules are operating normally.",
+                    "All host prerequisites, tools, and kernel modules are operating normally.",
                 )),
         )
         .padding(16)
@@ -166,6 +200,21 @@ pub fn view_host_health<'a>(
         .width(cosmic::iced::Length::Fill);
 
         content = content.push(ok_card);
+    } else {
+        let warn_card = widget::container(
+            widget::Row::new()
+                .spacing(12)
+                .align_y(Alignment::Center)
+                .push(widget::icon::from_name("dialog-warning-symbolic").size(24))
+                .push(widget::text::body(
+                    "Kernel modules and Docker are available, but user tools or storage features (adb, scrcpy, or CoW reflink) require attention.",
+                )),
+        )
+        .padding(16)
+        .class(cosmic::theme::Container::Card)
+        .width(cosmic::iced::Length::Fill);
+
+        content = content.push(warn_card);
     }
 
     // Diagnostic Checklist Cards

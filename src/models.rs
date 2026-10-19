@@ -481,6 +481,22 @@ impl AndroidInstance {
             format!("/dev/vndbinder{}", b3),
         )
     }
+
+    pub fn can_clone(&self) -> bool {
+        self.status.can_clone()
+    }
+
+    pub fn can_snapshot(&self) -> bool {
+        self.status.can_snapshot()
+    }
+
+    pub fn can_configure(&self) -> bool {
+        self.status.can_configure()
+    }
+
+    pub fn can_delete(&self) -> bool {
+        self.status.can_delete()
+    }
 }
 
 /// Runtime performance telemetry queried from Docker container stats.

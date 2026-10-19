@@ -1,6 +1,5 @@
-// src/backend/spoofing.rs
-// Hardware spoofing, device presets, mathematical identifier generators,
-// /data/local.prop writer, and ReDroid kernel boot arguments generator.
+//! Hardware spoofing, device presets, identifier generators,
+//! and redroid boot arguments.
 
 #![allow(dead_code)]
 
@@ -141,7 +140,7 @@ pub fn populate_preset(preset: DevicePreset) -> HardwareIdentity {
     identity
 }
 
-/// Alias for `populate_preset` matching the interface contract in PROJECT.md.
+/// Generates a hardware identity populated from a device preset.
 pub fn preset_for_device(preset: DevicePreset) -> HardwareIdentity {
     populate_preset(preset)
 }
@@ -225,7 +224,7 @@ pub fn build_redroid_boot_args(identity: &HardwareIdentity, gpu_enabled: bool) -
     ]
 }
 
-/// Alias for `build_redroid_boot_args(identity, true)` matching the interface contract in PROJECT.md.
+/// Generates redroid boot parameter strings for container startup.
 pub fn generate_boot_params(identity: &HardwareIdentity) -> Vec<String> {
     build_redroid_boot_args(identity, true)
 }

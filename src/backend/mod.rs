@@ -1,5 +1,4 @@
-// src/backend/mod.rs
-// Backend subsystems for CosmicReDroid.
+//! Backend subsystems for CosmicReDroid.
 
 pub mod adb_scrcpy;
 pub mod docker;

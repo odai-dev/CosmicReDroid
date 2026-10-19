@@ -44,12 +44,12 @@ pub fn config_file_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("instances.json"))
 }
 
-/// Alias for `config_file_path()` returning the instances configuration file path.
+/// Returns the path to the instances configuration file.
 pub fn config_path() -> Result<PathBuf> {
     config_file_path()
 }
 
-/// Alias for `config_file_path()` returning the instances configuration file path.
+/// Returns the path to the instances configuration file.
 pub fn instances_config_path() -> Result<PathBuf> {
     config_file_path()
 }

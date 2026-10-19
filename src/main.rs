@@ -1,15 +1,8 @@
-mod app;
-pub mod backend;
-pub mod config;
-pub mod i18n;
-pub mod models;
-pub mod ui;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
-    let _ = i18n::language_loader();
+    let _ = cosmic_redroid::i18n::language_loader();
 
     let settings = cosmic::app::Settings::default();
-    cosmic::app::run::<app::AppModel>(settings, ())?;
+    cosmic::app::run::<cosmic_redroid::app::AppModel>(settings, ())?;
     Ok(())
 }

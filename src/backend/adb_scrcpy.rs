@@ -1,6 +1,4 @@
-// src/backend/adb_scrcpy.rs
-// Subsystem: Asynchronous ADB Automation & Detached scrcpy Spawning
-// Strict zero-emoji compliance.
+//! Asynchronous ADB automation and scrcpy integration.
 
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -111,7 +109,7 @@ pub async fn wait_for_boot(port: u16, timeout_secs: u64) -> Result<()> {
     ))
 }
 
-/// Alias for `wait_for_boot` adhering to PROJECT.md interface contract.
+/// Polls until guest Android boot has completed or the timeout expires.
 pub async fn poll_boot_completed(port: u16, timeout_secs: u64) -> Result<()> {
     wait_for_boot(port, timeout_secs).await
 }

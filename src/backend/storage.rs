@@ -1,4 +1,3 @@
-// src/backend/storage.rs
 //! Storage and snapshot subsystem for CosmicReDroid.
 //!
 //! Provides Copy-on-Write (CoW) instance data cloning via `cp -a --reflink=auto`,

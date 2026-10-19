@@ -1,6 +1,4 @@
-// src/backend/docker.rs
-// Subsystem: Docker Container Engine via Bollard 0.18
-// Strict zero-emoji compliance.
+//! Docker container management via Bollard.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -581,7 +579,7 @@ pub async fn create_container(docker: &Docker, instance: &AndroidInstance) -> Re
     Ok(response.id)
 }
 
-/// Alias for create_container matching PROJECT.md interface contract.
+/// Creates a Docker container for the given Android instance.
 pub async fn create_instance_container(
     docker: &Docker,
     instance: &AndroidInstance,
