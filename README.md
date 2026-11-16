@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🚀 CosmicReDroid
+# CosmicReDroid
 
 ### Native Linux Android Multi-Instance Control Center
 **Built with Rust, System76 `libcosmic`, and Docker Bollard Engine**
@@ -33,20 +33,20 @@
 
 ---
 
-## 🌟 Key Capabilities
+## Key Capabilities
 
-- 📱 **Multi-Instance Container Orchestration**: Spin up, configure, and isolate multiple concurrent Android environments (Android 11, 13, and 14) powered by ReDroid through the asynchronous **Docker Bollard API**.
-- 🎭 **Hardware Identity Spoofing**: Built-in device profile engine with 1-click presets (**Samsung Galaxy S24 Ultra**, **Google Pixel 8 Pro**, **ASUS ROG Phone 8**) and custom device profiles featuring deterministic Luhn-verified IMEI, MAC, and Android ID generation.
-- ⚡ **Kernel-Level Resource Isolation**: Deterministic Linux **BinderFS** character node allocation (`/dev/binderfs/binder1,2,3`) preventing IPC collisions between parallel Android containers.
-- 🎮 **Direct DRI GPU Acceleration**: Pass-through host GPU acceleration via Linux Direct Rendering Infrastructure (`/dev/dri`) for high-framerate 120 FPS rendering and fluid gaming performance.
-- 📸 **Copy-on-Write (CoW) Snapshots**: Instantaneous atomic instance branching, state checkpointing, and fast zstd-compressed rollback mechanisms.
-- 🏭 **Integrated Image Factory**: Interactive studio for downloading official ReDroid base images or building customized images equipped with Google Play services (GApps) or ARM-to-x86 translation libraries (Houdini/NDK).
-- 🩺 **Host Health Diagnostics & Remediation**: In-app inspection for kernel module prerequisites (`binder_linux`, `ashmem_linux`) with one-click `pkexec` privilege elevation and remediation.
-- 🔊 **Audio & Screen Streaming**: Low-latency video mirroring and AAC audio streaming powered by integrated `scrcpy` connectivity.
+- **Multi-Instance Container Orchestration**: Spin up, configure, and isolate multiple concurrent Android environments (Android 11, 13, and 14) powered by ReDroid through the asynchronous Docker Bollard API.
+- **Hardware Identity Spoofing**: Built-in device profile engine with 1-click presets (Samsung Galaxy S24 Ultra, Google Pixel 8 Pro, ASUS ROG Phone 8) and custom device profiles featuring deterministic Luhn-verified IMEI, MAC, and Android ID generation.
+- **Kernel-Level Resource Isolation**: Deterministic Linux BinderFS character node allocation (`/dev/binderfs/binder1,2,3`) preventing IPC collisions between parallel Android containers.
+- **Direct DRI GPU Acceleration**: Pass-through host GPU acceleration via Linux Direct Rendering Infrastructure (`/dev/dri`) for high-framerate 120 FPS rendering and fluid gaming performance.
+- **Copy-on-Write (CoW) Snapshots**: Instantaneous atomic instance branching, state checkpointing, and fast zstd-compressed rollback mechanisms.
+- **Integrated Image Factory**: Interactive studio for downloading official ReDroid base images or building customized images equipped with Google Play services (GApps) or ARM-to-x86 translation libraries (Houdini/NDK).
+- **Host Health Diagnostics & Remediation**: In-app inspection for kernel module prerequisites (`binder_linux`, `ashmem_linux`) with one-click `pkexec` privilege elevation and remediation.
+- **Audio & Screen Streaming**: Low-latency video mirroring and AAC audio streaming powered by integrated `scrcpy` connectivity.
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -76,7 +76,7 @@
 
 ---
 
-## 🛠️ Prerequisites
+## Prerequisites
 
 - **OS**: Linux (Pop!_OS, Ubuntu 22.04+, or any Wayland-compatible distribution)
 - **Kernel Modules**: `binder_linux` and `ashmem_linux` (CosmicReDroid includes automated health checks for these)
@@ -85,7 +85,7 @@
 
 ---
 
-## 🚀 Building & Running
+## Building & Running
 
 This project uses [`just`](https://github.com/casey/just) as the command runner:
 
@@ -106,7 +106,7 @@ just test
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 CosmicReDroid/
@@ -128,6 +128,6 @@ CosmicReDroid/
 
 ---
 
-## 📄 License
+## License
 
 Distributed under the **GPL-3.0** License. See [`LICENSE`](LICENSE) for details.
